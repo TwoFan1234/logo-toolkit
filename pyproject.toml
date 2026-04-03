@@ -1,0 +1,35 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "logo-toolkit"
+version = "0.1.0"
+description = "A Windows-first desktop toolkit for batch image logo placement."
+readme = "README.md"
+requires-python = ">=3.10"
+authors = [
+  { name = "Codex" }
+]
+dependencies = [
+  "Pillow>=10.0.0",
+  "PySide6>=6.7.0"
+]
+
+[project.optional-dependencies]
+dev = [
+  "pyinstaller>=6.0.0",
+  "pytest>=8.0.0"
+]
+
+[project.scripts]
+logo-toolkit = "logo_toolkit.main:main"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.setuptools]
+package-dir = { "" = "src" }
+
+[tool.setuptools.packages.find]
+where = ["src"]

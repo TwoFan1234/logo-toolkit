@@ -1,0 +1,2 @@
+[console_scripts]
+logo-toolkit = logo_toolkit.main:main
