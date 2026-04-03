@@ -3,7 +3,7 @@
 from pathlib import Path
 
 from PySide6.QtCore import QPointF, QRectF, Qt, Signal
-from PySide6.QtGui import QColor, QImage, QMouseEvent, QPainter, QPen, QPixmap
+from PySide6.QtGui import QColor, QCursor, QImage, QMouseEvent, QPainter, QPainterPath, QPen, QPixmap
 from PySide6.QtWidgets import QWidget
 
 from logo_toolkit.core.models import LogoPlacement
@@ -14,7 +14,7 @@ class PreviewCanvas(QWidget):
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
-        self.setMinimumSize(680, 540)
+        self.setMinimumSize(540, 380)
         self.setMouseTracking(True)
         self._base_pixmap = QPixmap()
         self._logo_pixmap = QPixmap()
@@ -37,45 +37,66 @@ class PreviewCanvas(QWidget):
     def paintEvent(self, event) -> None:  # noqa: ANN001
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-        painter.fillRect(self.rect(), QColor("#fff9ef"))
+        painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
+
+        card_rect = QRectF(self.rect()).adjusted(5, 5, -5, -5)
+        card_path = QPainterPath()
+        card_path.addRoundedRect(card_rect, 18, 18)
+        painter.fillPath(card_path, QColor("#fcf8f0"))
+        painter.setPen(QPen(QColor("#dfd1b8"), 1.2))
+        painter.drawPath(card_path)
 
         if self._base_pixmap.isNull():
-            painter.setPen(QColor("#84775f"))
-            painter.drawText(self.rect(), Qt.AlignmentFlag.AlignCenter, "拖入图片后在这里预览")
+            empty_rect = card_rect.adjusted(26, 26, -26, -26)
+            painter.setPen(QColor("#6d6252"))
+            painter.drawText(
+                empty_rect,
+                Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignVCenter,
+                "拖入图片后在这里预览\n\n选中任意图片后，可直接在画布上摆放 Logo。",
+            )
             return
 
         self._image_rect = self._fit_rect(self._base_pixmap.width(), self._base_pixmap.height())
+        image_frame = self._image_rect.adjusted(-6, -6, 6, 6)
+        painter.setBrush(QColor("#ffffff"))
+        painter.setPen(QPen(QColor("#d6c8b0"), 1.2))
+        painter.drawRoundedRect(image_frame, 14, 14)
         painter.drawPixmap(self._image_rect.toRect(), self._base_pixmap)
 
         logo_rect = self._logo_rect()
         if not self._logo_pixmap.isNull():
             painter.drawPixmap(logo_rect.toRect(), self._logo_pixmap)
-            pen = QPen(QColor("#c24f3d"), 2, Qt.PenStyle.DashLine)
+            painter.setBrush(QColor(199, 96, 53, 38))
+            painter.setPen(QPen(Qt.PenStyle.NoPen))
+            painter.drawRoundedRect(logo_rect, 10, 10)
+            pen = QPen(QColor("#c76035"), 2, Qt.PenStyle.DashLine)
             painter.setPen(pen)
-            painter.drawRect(logo_rect)
-            painter.setBrush(QColor("#c24f3d"))
-            handle_size = 10
-            painter.drawRect(
-                QRectF(
-                    logo_rect.right() - handle_size / 2,
-                    logo_rect.bottom() - handle_size / 2,
-                    handle_size,
-                    handle_size,
-                )
+            painter.drawRoundedRect(logo_rect, 10, 10)
+            painter.setBrush(QColor("#c76035"))
+            painter.setPen(QPen(QColor("#fffaf1"), 2))
+            painter.drawEllipse(self._handle_rect())
+        else:
+            painter.setPen(QColor("#6f6554"))
+            painter.drawText(
+                card_rect.adjusted(0, 0, 0, -16),
+                Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignBottom,
+                "选择 Logo 后即可在这里拖拽定位",
             )
 
     def mousePressEvent(self, event: QMouseEvent) -> None:
         if self._logo_pixmap.isNull():
             return
         logo_rect = self._logo_rect()
-        handle_rect = QRectF(logo_rect.right() - 8, logo_rect.bottom() - 8, 16, 16)
+        handle_rect = self._handle_rect()
         if handle_rect.contains(event.position()):
             self._interaction_mode = "resize"
             self._resize_anchor = QPointF(logo_rect.left(), logo_rect.top())
+            self.setCursor(QCursor(Qt.CursorShape.SizeFDiagCursor))
             return
         if logo_rect.contains(event.position()):
             self._interaction_mode = "move"
             self._drag_offset = event.position() - logo_rect.topLeft()
+            self.setCursor(QCursor(Qt.CursorShape.ClosedHandCursor))
 
     def mouseMoveEvent(self, event: QMouseEvent) -> None:
         if self._base_pixmap.isNull() or self._logo_pixmap.isNull():
@@ -87,12 +108,21 @@ class PreviewCanvas(QWidget):
         elif self._interaction_mode == "resize":
             width = max(18.0, event.position().x() - self._resize_anchor.x())
             self._update_from_canvas(self._resize_anchor.x(), self._resize_anchor.y(), width)
+        else:
+            logo_rect = self._logo_rect()
+            if self._handle_rect().contains(event.position()):
+                self.setCursor(QCursor(Qt.CursorShape.SizeFDiagCursor))
+            elif logo_rect.contains(event.position()):
+                self.setCursor(QCursor(Qt.CursorShape.OpenHandCursor))
+            else:
+                self.unsetCursor()
 
     def mouseReleaseEvent(self, event: QMouseEvent) -> None:  # noqa: ARG002
         self._interaction_mode = ""
+        self.unsetCursor()
 
     def _fit_rect(self, image_width: int, image_height: int) -> QRectF:
-        area = self.rect().adjusted(18, 18, -18, -18)
+        area = self.rect().adjusted(24, 24, -24, -24)
         scale = min(area.width() / image_width, area.height() / image_height)
         draw_width = image_width * scale
         draw_height = image_height * scale
@@ -112,6 +142,16 @@ class PreviewCanvas(QWidget):
         if y + height > self._image_rect.bottom():
             y = self._image_rect.bottom() - height
         return QRectF(x, y, width, height)
+
+    def _handle_rect(self) -> QRectF:
+        logo_rect = self._logo_rect()
+        handle_size = 14.0
+        return QRectF(
+            logo_rect.right() - handle_size / 2,
+            logo_rect.bottom() - handle_size / 2,
+            handle_size,
+            handle_size,
+        )
 
     def _update_from_canvas(self, left: float, top: float, width: float) -> None:
         if self._image_rect.isEmpty():
