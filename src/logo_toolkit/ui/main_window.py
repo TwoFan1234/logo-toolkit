@@ -65,7 +65,7 @@ class MainWindow(QMainWindow):
         helper_layout.setSpacing(6)
         helper_title = QLabel("使用建议")
         helper_title.setObjectName("helperTitleLabel")
-        helper_copy = QLabel("先拖入一批图片，再选择 Logo，在预览区调好位置后统一导出。")
+        helper_copy = QLabel("先在左侧选择工具，再导入文件、设置参数并开始批量处理。")
         helper_copy.setObjectName("helperCopyLabel")
         helper_copy.setWordWrap(True)
         helper_layout.addWidget(helper_title)

@@ -6,11 +6,40 @@ from pathlib import Path
 
 
 SUPPORTED_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp"}
+SUPPORTED_VIDEO_EXTENSIONS = {".mp4", ".mov", ".mkv", ".avi", ".webm", ".m4v"}
 
 
 class ExportMode(str, Enum):
     NEW_FOLDER = "new_folder"
     OVERWRITE = "overwrite"
+
+
+class VideoOperationType(str, Enum):
+    COMPRESS = "compress"
+    CONVERT = "convert"
+    TRIM = "trim"
+    RESIZE = "resize"
+    EXTRACT_AUDIO = "extract_audio"
+
+
+class VideoCompressionPreset(str, Enum):
+    HIGH_QUALITY = "high_quality"
+    BALANCED = "balanced"
+    HIGH_COMPRESSION = "high_compression"
+
+
+class VideoContainerFormat(str, Enum):
+    MP4 = "mp4"
+    MOV = "mov"
+    MKV = "mkv"
+    AVI = "avi"
+    WEBM = "webm"
+
+
+class AudioExportFormat(str, Enum):
+    MP3 = "mp3"
+    WAV = "wav"
+    AAC = "aac"
 
 
 @dataclass(slots=True)
@@ -57,6 +86,66 @@ class ImageItem:
 
 
 @dataclass(slots=True)
+class VideoCompressionSettings:
+    preset: VideoCompressionPreset = VideoCompressionPreset.BALANCED
+    target_format: VideoContainerFormat = VideoContainerFormat.MP4
+
+
+@dataclass(slots=True)
+class VideoConversionSettings:
+    target_format: VideoContainerFormat = VideoContainerFormat.MP4
+
+
+@dataclass(slots=True)
+class VideoTrimSettings:
+    start_time: str = ""
+    end_time: str = ""
+
+
+@dataclass(slots=True)
+class VideoResizeSettings:
+    width: int = 1280
+    height: int = 720
+    keep_aspect_ratio: bool = True
+
+
+@dataclass(slots=True)
+class AudioExtractSettings:
+    target_format: AudioExportFormat = AudioExportFormat.MP3
+
+
+@dataclass(slots=True)
+class VideoItem:
+    source_path: Path
+    import_root: Path | None = None
+    duration_seconds: float | None = None
+    width: int | None = None
+    height: int | None = None
+    status: str = "待处理"
+    message: str = ""
+    output_path: Path | None = None
+
+    @property
+    def display_name(self) -> str:
+        return self.source_path.name
+
+    @property
+    def resolution_text(self) -> str:
+        if self.width and self.height:
+            return f"{self.width} x {self.height}"
+        return "-"
+
+    @property
+    def duration_text(self) -> str:
+        if self.duration_seconds is None:
+            return "-"
+        total_seconds = max(0, int(round(self.duration_seconds)))
+        hours, remainder = divmod(total_seconds, 3600)
+        minutes, seconds = divmod(remainder, 60)
+        return f"{hours:02d}:{minutes:02d}:{seconds:02d}"
+
+
+@dataclass(slots=True)
 class BatchJobConfig:
     input_files: list[Path]
     logo_file: Path
@@ -67,6 +156,21 @@ class BatchJobConfig:
     output_suffix: str = ""
     preserve_structure: bool = False
     source_roots: dict[Path, Path | None] = field(default_factory=dict)
+
+
+@dataclass(slots=True)
+class VideoBatchConfig:
+    input_files: list[Path]
+    operation_type: VideoOperationType
+    output_directory: Path | None = None
+    output_suffix: str = ""
+    preserve_structure: bool = True
+    source_roots: dict[Path, Path | None] = field(default_factory=dict)
+    compression: VideoCompressionSettings = field(default_factory=VideoCompressionSettings)
+    conversion: VideoConversionSettings = field(default_factory=VideoConversionSettings)
+    trim: VideoTrimSettings = field(default_factory=VideoTrimSettings)
+    resize: VideoResizeSettings = field(default_factory=VideoResizeSettings)
+    audio_extract: AudioExtractSettings = field(default_factory=AudioExtractSettings)
 
 
 @dataclass(slots=True)
