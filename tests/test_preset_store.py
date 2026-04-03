@@ -72,3 +72,33 @@ def test_preset_store_delete(tmp_path: Path) -> None:
     store.delete_preset("待删除模板")
 
     assert store.load_presets() == []
+
+
+def test_preset_store_accepts_string_export_mode(tmp_path: Path) -> None:
+    store = TemplatePresetStore(storage_path=tmp_path / "presets.json")
+    preset = TemplatePreset(
+        name="字符串导出模式",
+        placement=LogoPlacement(),
+        margin_ratio=0.0,
+        export_mode="new_folder",
+        preserve_structure=False,
+    )
+
+    store.save_preset(preset)
+    presets = store.load_presets()
+
+    assert len(presets) == 1
+    assert presets[0].export_mode == ExportMode.NEW_FOLDER
+
+
+def test_preset_store_defaults_preserve_structure_to_true_when_missing(tmp_path: Path) -> None:
+    store = TemplatePresetStore(storage_path=tmp_path / "presets.json")
+    store.storage_path.write_text(
+        '{"presets":[{"name":"旧模板","margin_ratio":0.0,"export_mode":"new_folder","placement":{}}]}',
+        encoding="utf-8",
+    )
+
+    presets = store.load_presets()
+
+    assert len(presets) == 1
+    assert presets[0].preserve_structure is True

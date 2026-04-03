@@ -1,5 +1,6 @@
 ﻿from __future__ import annotations
 
+import os
 from pathlib import Path
 
 from PySide6.QtCore import QSize, Qt, Signal
@@ -11,6 +12,7 @@ from PySide6.QtWidgets import (
     QDoubleSpinBox,
     QFileDialog,
     QFormLayout,
+    QFrame,
     QGridLayout,
     QGroupBox,
     QHBoxLayout,
@@ -117,8 +119,10 @@ class BatchLogoToolWidget(QWidget):
     def _build_ui(self) -> None:
         root_layout = QVBoxLayout(self)
         root_layout.setContentsMargins(0, 0, 0, 0)
+        root_layout.setSpacing(10)
 
         splitter = QSplitter(Qt.Orientation.Horizontal)
+        splitter.setHandleWidth(12)
         root_layout.addWidget(splitter)
 
         image_panel = QWidget()
@@ -131,7 +135,7 @@ class BatchLogoToolWidget(QWidget):
         settings_panel = QWidget()
         settings_layout = QVBoxLayout(settings_panel)
         settings_layout.setContentsMargins(0, 0, 0, 0)
-        settings_layout.setSpacing(14)
+        settings_layout.setSpacing(10)
         settings_layout.addWidget(self._build_preset_group())
         settings_layout.addWidget(self._build_logo_group())
         settings_layout.addWidget(self._build_export_group())
@@ -183,11 +187,14 @@ class BatchLogoToolWidget(QWidget):
         self.image_table.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.image_table.customContextMenuRequested.connect(self._show_image_menu)
         self.image_table.paths_dropped.connect(self._load_images)
-        self.image_table.setMinimumHeight(640)
+        self.image_table.setMinimumHeight(420)
         self.image_table.setWordWrap(False)
+        self.image_table.setAlternatingRowColors(True)
+        self.image_table.setObjectName("imageTable")
 
         drop_hint = QLabel("支持一次拖入多个文件夹或文件，工具会自动递归读取每个文件夹下的图片。")
         drop_hint.setWordWrap(True)
+        drop_hint.setObjectName("supportingLabel")
 
         layout.addLayout(buttons_layout)
         layout.addWidget(drop_hint)
@@ -219,6 +226,7 @@ class BatchLogoToolWidget(QWidget):
 
         tip = QLabel("模板会保存 logo 路径、位置大小、边距和导出设置，下次打开工具仍可直接复用。")
         tip.setWordWrap(True)
+        tip.setObjectName("supportingLabel")
 
         layout.addWidget(self.preset_combo)
         layout.addLayout(name_row)
@@ -281,7 +289,7 @@ class BatchLogoToolWidget(QWidget):
         self.output_dir_button = QPushButton("选择导出目录")
         self.output_dir_button.clicked.connect(self._choose_output_dir)
         self.preserve_structure_checkbox = QCheckBox("导出时保持原文件夹结构")
-        self.preserve_structure_checkbox.setChecked(False)
+        self.preserve_structure_checkbox.setChecked(True)
 
         self.run_button = QPushButton("开始批量导出")
         self.run_button.setObjectName("primaryRunButton")
@@ -303,23 +311,40 @@ class BatchLogoToolWidget(QWidget):
         self.progress_bar = QProgressBar()
         self.progress_bar.setValue(0)
         self.summary_label = QLabel("尚未开始处理")
+        self.summary_label.setObjectName("statusSummary")
 
         layout.addWidget(self.progress_bar)
         layout.addWidget(self.summary_label)
         return group
 
     def _build_preview_panel(self) -> QWidget:
-        panel = QWidget()
+        panel = QFrame()
+        panel.setObjectName("previewCard")
         layout = QVBoxLayout(panel)
-        layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(14)
+        layout.setContentsMargins(14, 14, 14, 14)
+        layout.setSpacing(10)
 
-        tips = QLabel("拖动 logo 调整位置，拖动右下角控制点缩放大小。数值输入与画布会双向同步。")
+        title_row = QHBoxLayout()
+        title_row.setSpacing(8)
+
+        preview_title = QLabel("实时预览")
+        preview_title.setObjectName("previewTitle")
+
+        preview_badge = QLabel("拖拽校准")
+        preview_badge.setObjectName("previewBadge")
+
+        title_row.addWidget(preview_title)
+        title_row.addWidget(preview_badge)
+        title_row.addStretch(1)
+
+        tips = QLabel("拖动 Logo 调整位置，拖动右下角控制点缩放大小。数值输入与画布会双向同步。")
         tips.setWordWrap(True)
+        tips.setObjectName("previewTips")
 
         self.preview_canvas = PreviewCanvas()
         self.preview_canvas.placement_changed.connect(self._handle_canvas_placement_change)
 
+        layout.addLayout(title_row)
         layout.addWidget(tips)
         layout.addWidget(self.preview_canvas, stretch=1)
         return panel
@@ -328,44 +353,109 @@ class BatchLogoToolWidget(QWidget):
         self.setStyleSheet(
             """
             QGroupBox {
-                background: #fff9ef;
-                border: 1px solid #d8c8a8;
+                background: #fffaf1;
+                border: 1px solid #dcc9a8;
                 border-radius: 16px;
                 margin-top: 12px;
                 font-weight: 600;
                 padding-top: 12px;
+                color: #2e322b;
             }
             QGroupBox::title {
-                left: 14px;
-                padding: 0 4px 0 4px;
+                left: 16px;
+                padding: 0 6px 0 6px;
+                color: #4f4638;
             }
             QPushButton {
-                background: #264653;
+                background: #27483f;
                 color: white;
                 border: none;
                 border-radius: 10px;
-                padding: 10px 14px;
+                padding: 8px 12px;
+                font-weight: 600;
             }
             QPushButton:hover {
-                background: #315f6f;
+                background: #33584e;
             }
             QPushButton#primaryRunButton {
-                background: #d35400;
-                font-size: 16px;
+                background: #b85b24;
+                font-size: 15px;
                 font-weight: 700;
-                padding: 14px 18px;
+                padding: 12px 16px;
             }
             QPushButton#primaryRunButton:hover {
-                background: #e67e22;
+                background: #cf6c2e;
             }
             QLineEdit, QComboBox, QDoubleSpinBox, QTableWidget {
                 background: white;
-                border: 1px solid #d8c8a8;
-                border-radius: 8px;
+                border: 1px solid #d8c7aa;
+                border-radius: 9px;
                 padding: 6px;
             }
             QLabel {
                 color: #473d2e;
+            }
+            #supportingLabel {
+                color: #6c604d;
+            }
+            #previewCard {
+                background: #f6efe0;
+                border: 1px solid #dbc7a5;
+                border-radius: 16px;
+            }
+            #previewTitle {
+                color: #24332e;
+                font-size: 16px;
+                font-weight: 700;
+            }
+            #previewBadge {
+                background: #ebdfc6;
+                color: #5e523f;
+                border-radius: 999px;
+                padding: 3px 8px;
+                font-size: 11px;
+                font-weight: 600;
+            }
+            #previewTips {
+                background: rgba(255, 255, 255, 0.68);
+                border: 1px solid #e0d2b7;
+                border-radius: 12px;
+                padding: 8px 10px;
+                color: #625645;
+                font-size: 12px;
+            }
+            #imageTable {
+                gridline-color: #eadcc1;
+                selection-background-color: #efe1c7;
+                selection-color: #2f2a20;
+                alternate-background-color: #fcf8f0;
+            }
+            QHeaderView::section {
+                background: #f1e4cb;
+                color: #554a3d;
+                border: none;
+                border-right: 1px solid #e1d2b5;
+                border-bottom: 1px solid #e1d2b5;
+                padding: 8px 6px;
+                font-weight: 700;
+            }
+            QProgressBar {
+                background: #f0e5d0;
+                border: 1px solid #decdb2;
+                border-radius: 10px;
+                text-align: center;
+                min-height: 18px;
+            }
+            QProgressBar::chunk {
+                background: #47695f;
+                border-radius: 8px;
+            }
+            #statusSummary {
+                color: #5d513f;
+                font-weight: 600;
+            }
+            QSplitter::handle {
+                background: transparent;
             }
             """
         )
@@ -630,7 +720,10 @@ class BatchLogoToolWidget(QWidget):
         self.preserve_structure_checkbox.setEnabled(needs_directory)
 
     def current_export_mode(self) -> ExportMode:
-        return self.export_mode_combo.currentData()
+        current = self.export_mode_combo.currentData()
+        if isinstance(current, ExportMode):
+            return current
+        return ExportMode(str(current or ExportMode.NEW_FOLDER.value))
 
     def _run_batch(self) -> None:
         if not self.items:
@@ -690,10 +783,12 @@ class BatchLogoToolWidget(QWidget):
         finally:
             progress.close()
 
+        output_hint = self._build_output_summary_text(export_mode, config)
         self.summary_label.setText(
-            f"处理完成: 共 {summary.total} 张，成功 {summary.succeeded}，失败 {summary.failed}"
+            f"处理完成: 共 {summary.total} 张，成功 {summary.succeeded}，失败 {summary.failed}。{output_hint}"
         )
         self._rebuild_table()
+        self._open_output_directory_after_export(export_mode, config)
 
     def _apply_result(self, result) -> None:  # noqa: ANN001
         for item in self.items:
@@ -773,3 +868,24 @@ class BatchLogoToolWidget(QWidget):
                 y_ratio = min(max(y_ratio, margin), max(margin, 1.0 - height_ratio - margin))
 
         return LogoPlacement(x_ratio=x_ratio, y_ratio=y_ratio, width_ratio=width_ratio)
+
+    def _build_output_summary_text(self, export_mode: ExportMode, config: BatchJobConfig) -> str:
+        if export_mode == ExportMode.OVERWRITE:
+            return "输出位置: 已直接覆盖原图所在文件夹。"
+
+        output_directory = config.output_directory or self.processor.resolve_output_directory(config)
+        return f"输出文件夹: {output_directory}"
+
+    def _open_output_directory_after_export(self, export_mode: ExportMode, config: BatchJobConfig) -> None:
+        if export_mode != ExportMode.NEW_FOLDER:
+            return
+
+        output_directory = config.output_directory or self.processor.resolve_output_directory(config)
+        if output_directory is None or not output_directory.exists():
+            return
+
+        try:
+            os.startfile(str(output_directory))
+        except OSError:
+            # 导出已经成功，打开资源管理器失败不应影响结果提示。
+            pass

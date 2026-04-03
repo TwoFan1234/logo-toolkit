@@ -79,13 +79,19 @@ class TemplatePreset:
     logo_path: Path | None = None
     output_directory: Path | None = None
 
+    def normalized_export_mode(self) -> ExportMode:
+        if isinstance(self.export_mode, ExportMode):
+            return self.export_mode
+        return ExportMode(str(self.export_mode))
+
     def to_dict(self) -> dict[str, object]:
+        export_mode = self.normalized_export_mode()
         return {
             "name": self.name,
             "logo_path": str(self.logo_path) if self.logo_path else None,
             "output_directory": str(self.output_directory) if self.output_directory else None,
             "margin_ratio": self.margin_ratio,
-            "export_mode": self.export_mode.value,
+            "export_mode": export_mode.value,
             "preserve_structure": self.preserve_structure,
             "placement": {
                 "x_ratio": self.placement.x_ratio,
@@ -106,7 +112,7 @@ class TemplatePreset:
             output_directory=Path(payload["output_directory"]) if payload.get("output_directory") else None,
             margin_ratio=float(payload.get("margin_ratio", 0.0)),
             export_mode=ExportMode(str(payload.get("export_mode", ExportMode.NEW_FOLDER.value))),
-            preserve_structure=bool(payload.get("preserve_structure", False)),
+            preserve_structure=bool(payload.get("preserve_structure", True)),
             placement=LogoPlacement(
                 x_ratio=float(placement_payload.get("x_ratio", 0.05)),
                 y_ratio=float(placement_payload.get("y_ratio", 0.05)),
