@@ -6,12 +6,19 @@ from PyInstaller.utils.hooks import collect_submodules
 
 project_root = Path(SPECPATH).parent
 hiddenimports = collect_submodules("PIL")
+vendor_bin = project_root / "resources" / "vendor" / "bin"
+binaries = []
+
+for binary_name in ("ffmpeg.exe", "ffprobe.exe"):
+    binary_path = vendor_bin / binary_name
+    if binary_path.exists():
+        binaries.append((str(binary_path), "vendor/bin"))
 
 
 a = Analysis(
     [str(project_root / "src" / "logo_toolkit" / "main.py")],
     pathex=[str(project_root / "src")],
-    binaries=[],
+    binaries=binaries,
     datas=[],
     hiddenimports=hiddenimports,
     hookspath=[],
