@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 from dataclasses import dataclass, field
 from enum import Enum
@@ -12,6 +12,27 @@ SUPPORTED_VIDEO_EXTENSIONS = {".mp4", ".mov", ".mkv", ".avi", ".webm", ".m4v"}
 class ExportMode(str, Enum):
     NEW_FOLDER = "new_folder"
     OVERWRITE = "overwrite"
+
+
+class TransformFormat(str, Enum):
+    KEEP = "keep"
+    JPEG = "jpeg"
+    PNG = "png"
+    WEBP = "webp"
+
+
+class CompressionLevel(str, Enum):
+    NONE = "none"
+    LIGHT = "light"
+    MEDIUM = "medium"
+    HIGH = "high"
+
+
+class ResizeMode(str, Enum):
+    NONE = "none"
+    SCALE_PERCENT = "scale_percent"
+    LONGEST_EDGE = "longest_edge"
+    EXACT_DIMENSIONS = "exact_dimensions"
 
 
 class VideoOperationType(str, Enum):
@@ -156,6 +177,37 @@ class BatchJobConfig:
     output_suffix: str = ""
     preserve_structure: bool = False
     source_roots: dict[Path, Path | None] = field(default_factory=dict)
+
+
+@dataclass(slots=True)
+class ResizeConfig:
+    mode: ResizeMode = ResizeMode.NONE
+    scale_percent: int = 100
+    longest_edge: int = 1600
+    target_width: int = 1600
+    target_height: int = 1600
+    keep_aspect_ratio: bool = True
+
+
+@dataclass(slots=True)
+class BatchTransformConfig:
+    input_files: list[Path]
+    transform_format: TransformFormat = TransformFormat.KEEP
+    compression_level: CompressionLevel = CompressionLevel.NONE
+    resize_config: ResizeConfig = field(default_factory=ResizeConfig)
+    export_mode: ExportMode = ExportMode.NEW_FOLDER
+    output_directory: Path | None = None
+    preserve_structure: bool = True
+    source_roots: dict[Path, Path | None] = field(default_factory=dict)
+
+    def has_operations(self) -> bool:
+        return any(
+            (
+                self.transform_format != TransformFormat.KEEP,
+                self.compression_level != CompressionLevel.NONE,
+                self.resize_config.mode != ResizeMode.NONE,
+            )
+        )
 
 
 @dataclass(slots=True)
