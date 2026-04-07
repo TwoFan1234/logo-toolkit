@@ -6,3 +6,5 @@ build/
 dist/
 *.spec.tmp
 *.egg-info/
+release/
+tmp_video_logo_debug/

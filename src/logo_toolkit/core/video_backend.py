@@ -72,7 +72,13 @@ class VideoBackend:
 
     def _run(self, command: list[str]) -> subprocess.CompletedProcess[bytes]:
         try:
-            return subprocess.run(command, check=True, capture_output=True, text=False)
+            return subprocess.run(
+                command,
+                check=True,
+                capture_output=True,
+                text=False,
+                **self._hidden_subprocess_window_options(),
+            )
         except FileNotFoundError as exc:
             raise VideoBackendError("未找到 ffmpeg/ffprobe，请先安装或重新打包资源。") from exc
         except subprocess.CalledProcessError as exc:
@@ -82,6 +88,18 @@ class VideoBackend:
                 or "视频处理命令执行失败。"
             )
             raise VideoBackendError(message) from exc
+
+    @staticmethod
+    def _hidden_subprocess_window_options() -> dict[str, Any]:
+        if sys.platform != "win32":
+            return {}
+        startupinfo = subprocess.STARTUPINFO()
+        startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+        startupinfo.wShowWindow = subprocess.SW_HIDE
+        return {
+            "creationflags": subprocess.CREATE_NO_WINDOW,
+            "startupinfo": startupinfo,
+        }
 
     @staticmethod
     def _decode_output(payload: bytes | None) -> str:

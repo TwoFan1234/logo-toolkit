@@ -1,1 +1,1 @@
-﻿"""Tool registrations for the Logo Toolkit shell."""
+"""Tool registrations for the 素材工具箱 shell."""

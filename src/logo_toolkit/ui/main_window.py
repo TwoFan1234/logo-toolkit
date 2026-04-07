@@ -14,13 +14,14 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from logo_toolkit.app_info import APP_DISPLAY_NAME
 from logo_toolkit.tools.registry import build_tool_registry
 
 
 class MainWindow(QMainWindow):
     def __init__(self) -> None:
         super().__init__()
-        self.setWindowTitle("Logo Toolkit")
+        self.setWindowTitle(APP_DISPLAY_NAME)
         self.resize(1320, 820)
         self._tool_widgets: dict[str, QWidget] = {}
         self._tool_descriptions: dict[str, str] = {}

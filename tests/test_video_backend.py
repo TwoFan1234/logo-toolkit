@@ -2,6 +2,7 @@
 
 import json
 import subprocess
+import sys
 from pathlib import Path
 
 from logo_toolkit.core.video_backend import VideoBackend, VideoBackendError
@@ -54,3 +55,32 @@ def test_run_raises_readable_error_from_utf8_stderr(monkeypatch) -> None:
         assert "路径无效" in str(exc)
     else:
         raise AssertionError("Expected VideoBackendError")
+
+
+def test_run_hides_subprocess_window_on_windows(monkeypatch) -> None:
+    backend = VideoBackend()
+    captured: dict[str, object] = {}
+
+    class FakeStartupInfo:
+        def __init__(self) -> None:
+            self.dwFlags = 0
+            self.wShowWindow = 1
+
+    def fake_subprocess_run(command, **kwargs):  # noqa: ANN001, ANN003
+        captured["command"] = command
+        captured.update(kwargs)
+        return subprocess.CompletedProcess(command, 0, stdout=b"", stderr=b"")
+
+    monkeypatch.setattr(sys, "platform", "win32")
+    monkeypatch.setattr(subprocess, "STARTUPINFO", FakeStartupInfo)
+    monkeypatch.setattr(subprocess, "STARTF_USESHOWWINDOW", 1, raising=False)
+    monkeypatch.setattr(subprocess, "SW_HIDE", 0, raising=False)
+    monkeypatch.setattr(subprocess, "CREATE_NO_WINDOW", 0x08000000, raising=False)
+    monkeypatch.setattr(subprocess, "run", fake_subprocess_run)
+
+    backend._run(["ffmpeg"])
+
+    startupinfo = captured["startupinfo"]
+    assert captured["creationflags"] == 0x08000000
+    assert startupinfo.dwFlags == 1
+    assert startupinfo.wShowWindow == 0

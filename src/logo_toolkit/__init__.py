@@ -1,4 +1,4 @@
-"""Logo Toolkit package."""
+"""素材工具箱 package."""
 
 __all__ = ["__version__"]
 

@@ -10,4 +10,4 @@ if (-not (Test-Path $ffmpegExe) -or -not (Test-Path $ffprobeExe)) {
 }
 
 pip install -e .[dev]
-pyinstaller packaging/logo_toolkit.spec
+pyinstaller -y packaging/logo_toolkit.spec

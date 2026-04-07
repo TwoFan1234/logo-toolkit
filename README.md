@@ -1,78 +1,82 @@
-# Logo Toolkit
+﻿# 素材工具箱
 
-`Logo Toolkit` 是一个 Windows 优先的桌面图片工具集，当前内置两个批量处理工具：
+素材工具箱是一个 Windows 优先的批量图片/视频处理桌面工具，面向非技术同事使用，同时保留源码工程，方便后续继续扩展。
 
-- `批量加 Logo`：给整批图片统一叠加一个可交互定位的 Logo
-- `批量处理图片`：批量完成转格式、压缩和改尺寸
+## 已有功能
 
-## 当前功能
+- 批量处理图片
+- 批量给图片添加 Logo
+- 批量视频处理
+- 批量给视频添加 Logo
+- 视频套边框，支持把 16:9、1:1、9:16 等素材相互扩展成其他画幅
 
-### 批量加 Logo
+## 给团队同事使用
 
-- 批量导入图片文件或整个文件夹
-- 为整批图片统一选择一个 Logo
-- 在预览区拖动和缩放 Logo，实时调整位置与大小
-- 支持导出到新文件夹或覆盖原图
-- 支持模板保存与复用
-- 支持导出时保持原文件夹结构
+团队同事不需要安装 Python，也不需要使用 GitHub。维护者打包后，把 `release` 目录里的 zip 文件发到团队云盘即可。
 
-### 批量处理图片
+生成团队分享包：
 
-- 批量转格式：支持输出为 `JPG`、`PNG`、`WEBP`
-- 批量压缩：支持 `关闭 / 轻度 / 中等 / 高压缩`
-- 批量改尺寸：
-  - 按百分比缩放
-  - 按最长边缩放
-  - 按宽高缩放
-- 支持导出到新文件夹或覆盖原图
-- 支持导出时保持原文件夹结构
-- 导出完成后自动打开输出目录
-
-## 快速开始
-
-1. 安装依赖
-
-```bash
-pip install -e .[dev]
+```powershell
+powershell -ExecutionPolicy Bypass -File packaging/create_team_release.ps1
 ```
 
-2. 启动应用
+生成后会得到类似：
 
-```bash
+```text
+release/素材工具箱-v0.1.0-20260407.zip
+```
+
+同事只需要解压 zip，然后双击 `素材工具箱.exe`。当前发布包使用单文件 exe，减少误删 `_internal` 文件夹导致无法启动的问题。
+
+更详细的小白说明见：
+
+```text
+docs/TEAM_USAGE.md
+```
+
+## 开发运行
+
+```powershell
+pip install -e .[dev]
 logo-toolkit
 ```
 
-或：
+也可以使用：
 
-```bash
+```powershell
 python -m logo_toolkit
 ```
 
 ## 打包 Windows 可执行版
 
-```bash
-pyinstaller packaging/logo_toolkit.spec
+```powershell
+powershell -ExecutionPolicy Bypass -File packaging/build_windows.ps1
 ```
 
-打包完成后，可执行文件位于：
+如果只想生成团队可分享 zip，优先使用：
 
-```text
-dist/LogoToolkit/LogoToolkit.exe
+```powershell
+powershell -ExecutionPolicy Bypass -File packaging/create_team_release.ps1
 ```
 
-## 项目结构
+## 测试
 
-```text
-src/logo_toolkit/
-  core/
-  tools/
-  ui/
-tests/
-packaging/
+```powershell
+python -m pytest -q
 ```
 
-## 设计说明
+## 两台电脑同步开发
 
-- 核心图片处理逻辑与界面解耦，便于后续继续扩展更多工具
-- 批量处理默认优先保证结果清晰、路径可控、适合新手使用
-- v1 聚焦常见图片整理场景，不包含更复杂的裁剪、滤镜、自动命名规则等高级功能
+开始开发前先拉取最新代码：
+
+```powershell
+git pull --ff-only origin main
+```
+
+改完后提交并推送：
+
+```powershell
+git add .
+git commit -m "描述这次改动"
+git push origin main
+```
