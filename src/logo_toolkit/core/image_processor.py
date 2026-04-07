@@ -11,6 +11,7 @@ from logo_toolkit.core.models import (
     ExportMode,
     ExportResult,
     LogoPlacement,
+    PixelLogoPlacement,
     RenderOptions,
     SUPPORTED_EXTENSIONS,
 )
@@ -33,11 +34,21 @@ class ImageProcessor:
         logo_path: Path,
         placement: LogoPlacement,
         render_options: RenderOptions,
+        pixel_placement: PixelLogoPlacement | None = None,
+        use_pixel_positioning: bool = False,
         max_size: tuple[int, int] | None = None,
     ) -> Image.Image:
         placement = placement.normalized()
+        pixel_placement = (pixel_placement or PixelLogoPlacement()).normalized()
         with Image.open(image_path) as base_image, Image.open(logo_path) as logo_image:
-            rendered = self._compose(base_image, logo_image, placement, render_options)
+            rendered = self._compose(
+                base_image,
+                logo_image,
+                placement,
+                render_options,
+                pixel_placement=pixel_placement,
+                use_pixel_positioning=use_pixel_positioning,
+            )
         if max_size:
             rendered.thumbnail(max_size, self._resample(render_options.smoothing))
         return rendered
@@ -61,6 +72,8 @@ class ImageProcessor:
                     logo_path=logo_path,
                     placement=config.placement,
                     render_options=config.render_options,
+                    pixel_placement=config.pixel_placement,
+                    use_pixel_positioning=config.use_pixel_positioning,
                     export_mode=config.export_mode,
                     output_directory=output_directory,
                     output_suffix=config.output_suffix,
@@ -87,12 +100,15 @@ class ImageProcessor:
         render_options: RenderOptions,
         export_mode: ExportMode,
         output_directory: Path | None,
+        pixel_placement: PixelLogoPlacement | None = None,
+        use_pixel_positioning: bool = False,
         output_suffix: str = "",
         preserve_structure: bool = False,
         source_root: Path | None = None,
     ) -> Path:
         self.validate_image(image_path)
         placement = placement.normalized()
+        pixel_placement = (pixel_placement or PixelLogoPlacement()).normalized()
         output_path = self.build_output_path(
             image_path=image_path,
             export_mode=export_mode,
@@ -104,7 +120,14 @@ class ImageProcessor:
         output_path.parent.mkdir(parents=True, exist_ok=True)
 
         with Image.open(image_path) as base_image, Image.open(logo_path) as logo_image:
-            rendered = self._compose(base_image, logo_image, placement, render_options)
+            rendered = self._compose(
+                base_image,
+                logo_image,
+                placement,
+                render_options,
+                pixel_placement=pixel_placement,
+                use_pixel_positioning=use_pixel_positioning,
+            )
 
         save_kwargs = {}
         if output_path.suffix.lower() in {".jpg", ".jpeg"}:
@@ -182,23 +205,41 @@ class ImageProcessor:
         logo_image: Image.Image,
         placement: LogoPlacement,
         render_options: RenderOptions,
+        pixel_placement: PixelLogoPlacement | None = None,
+        use_pixel_positioning: bool = False,
     ) -> Image.Image:
         base = ImageOps.exif_transpose(base_image).convert("RGBA")
         logo = logo_image.convert("RGBA")
-        target_width = max(1, int(round(base.width * placement.width_ratio)))
-        if render_options.keep_aspect_ratio:
-            scale_ratio = target_width / max(logo.width, 1)
-            target_height = max(1, int(round(logo.height * scale_ratio)))
+        if use_pixel_positioning:
+            active_pixel_placement = (pixel_placement or PixelLogoPlacement()).normalized()
+            x, y, target_width, target_height = active_pixel_placement.to_overlay_box(
+                frame_width=base.width,
+                frame_height=base.height,
+                logo_width=logo.width,
+                logo_height=logo.height,
+                keep_aspect_ratio=render_options.keep_aspect_ratio,
+            )
+            resized_logo = logo.resize(
+                (max(1, int(round(target_width))), max(1, int(round(target_height)))),
+                self._resample(render_options.smoothing),
+            )
         else:
-            target_height = target_width
-        resized_logo = logo.resize((target_width, target_height), self._resample(render_options.smoothing))
-        x = int(round(base.width * placement.x_ratio))
-        y = int(round(base.height * placement.y_ratio))
-        if x + resized_logo.width > base.width:
-            x = max(0, base.width - resized_logo.width)
-        if y + resized_logo.height > base.height:
-            y = max(0, base.height - resized_logo.height)
-        base.alpha_composite(resized_logo, (x, y))
+            target_width = max(1, int(round(base.width * placement.width_ratio)))
+            if render_options.keep_aspect_ratio:
+                scale_ratio = target_width / max(logo.width, 1)
+                target_height = max(1, int(round(logo.height * scale_ratio)))
+            else:
+                target_height = target_width
+            resized_logo = logo.resize((target_width, target_height), self._resample(render_options.smoothing))
+            x, y, _, _ = placement.to_overlay_box(
+                frame_width=base.width,
+                frame_height=base.height,
+                logo_width=logo.width,
+                logo_height=logo.height,
+                keep_aspect_ratio=render_options.keep_aspect_ratio,
+                reference_mode=render_options.reference_mode,
+            )
+        base.alpha_composite(resized_logo, (int(round(x)), int(round(y))))
         return base
 
     @staticmethod

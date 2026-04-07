@@ -5,7 +5,7 @@ from pathlib import Path
 from PIL import Image
 
 from logo_toolkit.core.image_processor import ImageProcessor
-from logo_toolkit.core.models import BatchJobConfig, ExportMode, LogoPlacement, RenderOptions
+from logo_toolkit.core.models import BatchJobConfig, ExportMode, LogoPlacement, PixelLogoPlacement, RenderOptions
 
 
 def create_image(path: Path, size: tuple[int, int], color: tuple[int, int, int, int]) -> None:
@@ -125,3 +125,53 @@ def test_process_batch_reports_failures_without_stopping(tmp_path: Path) -> None
     assert summary.total == 2
     assert summary.succeeded == 1
     assert summary.failed == 1
+
+
+def test_export_image_supports_pixel_logo_positioning(tmp_path: Path) -> None:
+    processor = ImageProcessor()
+    image_path = tmp_path / "base.png"
+    logo_path = tmp_path / "logo.png"
+    output_dir = tmp_path / "output"
+    create_image(image_path, (400, 200), (255, 255, 255, 255))
+    create_image(logo_path, (100, 40), (255, 0, 0, 255))
+
+    output_path = processor.export_image(
+        image_path=image_path,
+        logo_path=logo_path,
+        placement=LogoPlacement(),
+        render_options=RenderOptions(),
+        export_mode=ExportMode.NEW_FOLDER,
+        output_directory=output_dir,
+        pixel_placement=PixelLogoPlacement(margin_x_px=24, margin_y_px=32, width_px=120, anchor="bottom_right"),
+        use_pixel_positioning=True,
+    )
+
+    with Image.open(output_path) as output:
+        assert output.size == (400, 200)
+        assert output.getpixel((316, 144))[:3] == (255, 0, 0)
+        assert output.getpixel((20, 20))[:3] == (255, 255, 255)
+
+
+def test_process_batch_uses_pixel_logo_positioning_when_enabled(tmp_path: Path) -> None:
+    processor = ImageProcessor()
+    image_path = tmp_path / "base.png"
+    logo_path = tmp_path / "logo.png"
+    create_image(image_path, (320, 180), (255, 255, 255, 255))
+    create_image(logo_path, (100, 50), (0, 0, 255, 255))
+
+    config = BatchJobConfig(
+        input_files=[image_path],
+        logo_file=logo_path,
+        placement=LogoPlacement(),
+        render_options=RenderOptions(),
+        pixel_placement=PixelLogoPlacement(margin_x_px=18, margin_y_px=20, width_px=90, anchor="top_left"),
+        use_pixel_positioning=True,
+        output_directory=tmp_path / "exports",
+    )
+    summary = processor.process_batch(config)
+
+    assert summary.succeeded == 1
+    assert summary.results[0].output_path is not None
+    with Image.open(summary.results[0].output_path) as output:
+        assert output.getpixel((40, 40))[:3] == (0, 0, 255)
+        assert output.getpixel((150, 120))[:3] == (255, 255, 255)

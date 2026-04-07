@@ -1,6 +1,7 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import json
+import locale
 import subprocess
 import sys
 from dataclasses import dataclass
@@ -40,8 +41,9 @@ class VideoBackend:
             str(source_path),
         ]
         completed = self._run(command)
+        stdout = self._decode_output(completed.stdout)
         try:
-            return json.loads(completed.stdout or "{}")
+            return json.loads(stdout or "{}")
         except json.JSONDecodeError as exc:  # noqa: PERF203
             raise VideoBackendError("ffprobe 返回了无法解析的元数据。") from exc
 
@@ -50,14 +52,54 @@ class VideoBackend:
         command = [str(tools.ffmpeg), *arguments]
         self._run(command)
 
-    def _run(self, command: list[str]) -> subprocess.CompletedProcess[str]:
+    def extract_frame(self, source_path: Path, output_path: Path, timestamp_seconds: float = 0.0) -> None:
+        tools = self.ensure_tools()
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        command = [
+            str(tools.ffmpeg),
+            "-y",
+            "-ss",
+            f"{max(0.0, float(timestamp_seconds)):.3f}",
+            "-i",
+            str(source_path),
+            "-frames:v",
+            "1",
+            "-q:v",
+            "2",
+            str(output_path),
+        ]
+        self._run(command)
+
+    def _run(self, command: list[str]) -> subprocess.CompletedProcess[bytes]:
         try:
-            return subprocess.run(command, check=True, capture_output=True, text=True)
+            return subprocess.run(command, check=True, capture_output=True, text=False)
         except FileNotFoundError as exc:
             raise VideoBackendError("未找到 ffmpeg/ffprobe，请先安装或重新打包资源。") from exc
         except subprocess.CalledProcessError as exc:
-            message = (exc.stderr or exc.stdout or "").strip() or "视频处理命令执行失败。"
+            message = (
+                self._decode_output(exc.stderr).strip()
+                or self._decode_output(exc.stdout).strip()
+                or "视频处理命令执行失败。"
+            )
             raise VideoBackendError(message) from exc
+
+    @staticmethod
+    def _decode_output(payload: bytes | None) -> str:
+        if not payload:
+            return ""
+        encodings = ["utf-8", locale.getpreferredencoding(False), "gbk"]
+        tried: set[str] = set()
+        for encoding in encodings:
+            normalized = (encoding or "").strip()
+            key = normalized.lower()
+            if not normalized or key in tried:
+                continue
+            tried.add(key)
+            try:
+                return payload.decode(normalized)
+            except UnicodeDecodeError:
+                continue
+        return payload.decode("utf-8", errors="replace")
 
     def _resolve_tool_paths(self) -> VideoToolPaths:
         for directory in self._candidate_directories():

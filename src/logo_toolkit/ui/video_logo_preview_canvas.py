@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 from pathlib import Path
 
@@ -6,11 +6,11 @@ from PySide6.QtCore import QPointF, QRectF, Qt, Signal
 from PySide6.QtGui import QColor, QCursor, QImage, QMouseEvent, QPainter, QPainterPath, QPen, QPixmap
 from PySide6.QtWidgets import QWidget
 
-from logo_toolkit.core.models import LogoPlacement
+from logo_toolkit.core.models import PixelLogoPlacement
 
 
-class PreviewCanvas(QWidget):
-    placement_changed = Signal(float, float, float)
+class VideoLogoPreviewCanvas(QWidget):
+    placement_changed = Signal(int, int, int, str)
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -18,30 +18,27 @@ class PreviewCanvas(QWidget):
         self.setMouseTracking(True)
         self._base_pixmap = QPixmap()
         self._logo_pixmap = QPixmap()
-        self._placement = LogoPlacement()
+        self._placement = PixelLogoPlacement()
         self._image_rect = QRectF()
         self._drag_offset = QPointF()
         self._resize_anchor = QPointF()
         self._interaction_mode = ""
-        self._reference_mode = "frame_axis"
         self._keep_aspect_ratio = True
 
     def set_images(
         self,
         image_path: Path | None,
         logo_path: Path | None,
-        placement: LogoPlacement,
-        reference_mode: str = "frame_axis",
+        placement: PixelLogoPlacement,
         keep_aspect_ratio: bool = True,
     ) -> None:
         self._base_pixmap = QPixmap(str(image_path)) if image_path else QPixmap()
         self._logo_pixmap = QPixmap(str(logo_path)) if logo_path else QPixmap()
         self._placement = placement.normalized()
-        self._reference_mode = reference_mode
         self._keep_aspect_ratio = keep_aspect_ratio
         self.update()
 
-    def set_placement(self, placement: LogoPlacement) -> None:
+    def set_placement(self, placement: PixelLogoPlacement) -> None:
         self._placement = placement.normalized()
         self.update()
 
@@ -63,7 +60,7 @@ class PreviewCanvas(QWidget):
             painter.drawText(
                 empty_rect,
                 Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignVCenter,
-                "拖入图片后在这里预览\n\n选中任意图片后，可直接在画布上摆放 Logo。",
+                "选择视频和 Logo 后在这里直接校准\n\n拖动 Logo 调整位置，拖动右下角控制点调整大小。",
             )
             return
 
@@ -91,7 +88,7 @@ class PreviewCanvas(QWidget):
             painter.drawText(
                 card_rect.adjusted(0, 0, 0, -16),
                 Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignBottom,
-                "选择 Logo 后即可在这里拖拽定位",
+                "选择 Logo 后即可在这里预览定位",
             )
 
     def mousePressEvent(self, event: QMouseEvent) -> None:
@@ -145,16 +142,19 @@ class PreviewCanvas(QWidget):
         if self._base_pixmap.isNull() or self._logo_pixmap.isNull():
             return QRectF()
         x, y, width, height = self._placement.to_overlay_box(
-            frame_width=self._image_rect.width(),
-            frame_height=self._image_rect.height(),
+            frame_width=self._base_pixmap.width(),
+            frame_height=self._base_pixmap.height(),
             logo_width=self._logo_pixmap.width(),
             logo_height=self._logo_pixmap.height(),
             keep_aspect_ratio=self._keep_aspect_ratio,
-            reference_mode=self._reference_mode,
         )
-        x += self._image_rect.left()
-        y += self._image_rect.top()
-        return QRectF(x, y, width, height)
+        scale_x, scale_y = self._display_scale()
+        return QRectF(
+            self._image_rect.left() + x * scale_x,
+            self._image_rect.top() + y * scale_y,
+            width * scale_x,
+            height * scale_y,
+        )
 
     def _handle_rect(self) -> QRectF:
         logo_rect = self._logo_rect()
@@ -169,25 +169,42 @@ class PreviewCanvas(QWidget):
     def _update_from_canvas(self, left: float, top: float, width: float) -> None:
         if self._image_rect.isEmpty():
             return
+        scale_x, scale_y = self._display_scale()
+        if scale_x <= 0.0 or scale_y <= 0.0:
+            return
         local_left = left - self._image_rect.left()
         local_top = top - self._image_rect.top()
+        source_left = local_left / scale_x
+        source_top = local_top / scale_y
+        source_width = width / scale_x
         if self._keep_aspect_ratio:
-            height = width * (self._logo_pixmap.height() / max(self._logo_pixmap.width(), 1))
+            source_height = source_width * (self._logo_pixmap.height() / max(self._logo_pixmap.width(), 1))
         else:
-            height = width
-        normalized = LogoPlacement.from_overlay_box(
-            left=local_left,
-            top=local_top,
-            overlay_width=width,
-            overlay_height=height,
-            frame_width=self._image_rect.width(),
-            frame_height=self._image_rect.height(),
-            anchor=self._placement.anchor,
-            reference_mode=self._reference_mode,
+            source_height = width / scale_y
+        placement = PixelLogoPlacement.auto_from_overlay_box(
+            left=source_left,
+            top=source_top,
+            overlay_width=source_width,
+            overlay_height=source_height,
+            frame_width=self._base_pixmap.width(),
+            frame_height=self._base_pixmap.height(),
         )
-        self._placement = normalized
-        self.placement_changed.emit(normalized.x_ratio, normalized.y_ratio, normalized.width_ratio)
+        self._placement = placement
+        self.placement_changed.emit(
+            placement.margin_x_px,
+            placement.margin_y_px,
+            placement.width_px,
+            placement.anchor,
+        )
         self.update()
+
+    def _display_scale(self) -> tuple[float, float]:
+        if self._base_pixmap.isNull() or self._image_rect.isEmpty():
+            return 1.0, 1.0
+        return (
+            self._image_rect.width() / max(float(self._base_pixmap.width()), 1.0),
+            self._image_rect.height() / max(float(self._base_pixmap.height()), 1.0),
+        )
 
     def export_preview_image(self) -> QImage | None:
         if self._base_pixmap.isNull():

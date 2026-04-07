@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import os
 from pathlib import Path
@@ -8,9 +8,11 @@ from PySide6.QtWidgets import (
     QAbstractItemView,
     QCheckBox,
     QComboBox,
+    QDialog,
+    QDialogButtonBox,
+    QDoubleSpinBox,
     QFileDialog,
     QFormLayout,
-    QFrame,
     QGridLayout,
     QGroupBox,
     QHBoxLayout,
@@ -34,20 +36,26 @@ from PySide6.QtWidgets import (
 )
 
 from logo_toolkit.core.file_utils import collect_videos
+from logo_toolkit.core.image_processor import ImageProcessor
 from logo_toolkit.core.models import (
     AudioExportFormat,
     AudioExtractSettings,
+    LOGO_ANCHOR_LABELS,
+    PixelLogoPlacement,
+    RenderOptions,
     VideoBatchConfig,
     VideoCompressionPreset,
+    VideoCompressionSettings,
     VideoContainerFormat,
     VideoConversionSettings,
-    VideoCompressionSettings,
     VideoItem,
+    VideoLogoSettings,
     VideoOperationType,
     VideoResizeSettings,
     VideoTrimSettings,
 )
 from logo_toolkit.core.video_processor import VideoProcessor
+from logo_toolkit.ui.video_logo_preview_canvas import VideoLogoPreviewCanvas
 
 
 class VideoImportGroupBox(QGroupBox):
@@ -104,12 +112,82 @@ class VideoTableWidget(QTableWidget):
         super().dropEvent(event)
 
 
+class VideoLogoPreviewDialog(QDialog):
+    def __init__(
+        self,
+        frame_path: Path,
+        logo_path: Path,
+        placement: PixelLogoPlacement,
+        keep_aspect_ratio: bool,
+        parent: QWidget | None = None,
+    ) -> None:
+        super().__init__(parent)
+        self.setWindowTitle("视频 Logo 预览校准")
+        self.resize(920, 680)
+        self.placement = placement.normalized()
+        self.keep_aspect_ratio = keep_aspect_ratio
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(16, 16, 16, 16)
+        layout.setSpacing(10)
+
+        tip = QLabel("拖动 Logo 调整位置，拖动右下角控制点缩放大小。工具会自动识别它更靠近哪个角，并记录对应的像素边距。")
+        tip.setWordWrap(True)
+
+        self.preview_canvas = VideoLogoPreviewCanvas()
+        self.preview_canvas.set_images(
+            frame_path,
+            logo_path,
+            self.placement,
+            keep_aspect_ratio=self.keep_aspect_ratio,
+        )
+        self.preview_canvas.placement_changed.connect(self._handle_placement_change)
+
+        buttons = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
+        )
+        buttons.accepted.connect(self.accept)
+        buttons.rejected.connect(self.reject)
+
+        layout.addWidget(tip)
+        layout.addWidget(self.preview_canvas, stretch=1)
+        layout.addWidget(buttons)
+
+    def _handle_placement_change(self, margin_x_px: int, margin_y_px: int, width_px: int, anchor: str) -> None:
+        self.placement = PixelLogoPlacement(
+            margin_x_px=margin_x_px,
+            margin_y_px=margin_y_px,
+            width_px=width_px,
+            anchor=anchor,
+        ).normalized()
+
+
 class BatchVideoToolWidget(QWidget):
-    def __init__(self, parent: QWidget | None = None) -> None:
+    DEFAULT_OPERATIONS = [
+        VideoOperationType.COMPRESS,
+        VideoOperationType.CONVERT,
+        VideoOperationType.TRIM,
+        VideoOperationType.RESIZE,
+        VideoOperationType.EXTRACT_AUDIO,
+    ]
+
+    def __init__(
+        self,
+        parent: QWidget | None = None,
+        available_operations: list[VideoOperationType] | None = None,
+    ) -> None:
         super().__init__(parent)
         self.processor = VideoProcessor()
+        self.image_processor = ImageProcessor()
         self.items: list[VideoItem] = []
         self.output_directory: Path | None = None
+        self.logo_path: Path | None = None
+        self.logo_pixel_placement = PixelLogoPlacement(margin_x_px=40, margin_y_px=40, width_px=220, anchor="bottom_right")
+        self.logo_render_options = RenderOptions()
+        self.available_operations = list(available_operations or self.DEFAULT_OPERATIONS)
+        if not self.available_operations:
+            raise ValueError("至少需要提供一个视频处理模式。")
+        self.logo_only_mode = self.available_operations == [VideoOperationType.ADD_LOGO]
         self.resize_presets: dict[str, tuple[int, int]] = {
             "1920 x 1080 (1080p)": (1920, 1080),
             "1280 x 720 (720p)": (1280, 720),
@@ -136,29 +214,45 @@ class BatchVideoToolWidget(QWidget):
         operation_layout = QVBoxLayout(operation_panel)
         operation_layout.setContentsMargins(0, 0, 0, 0)
         operation_layout.setSpacing(10)
-        operation_layout.addWidget(self._build_operation_group())
-        operation_layout.addWidget(self._build_metadata_group())
-        operation_layout.addStretch(1)
 
         output_panel = QWidget()
         output_layout = QVBoxLayout(output_panel)
         output_layout.setContentsMargins(0, 0, 0, 0)
         output_layout.setSpacing(10)
-        output_layout.addWidget(self._build_output_group())
-        output_layout.addWidget(self._build_progress_group())
-        output_layout.addStretch(1)
+
+        if self.logo_only_mode:
+            operation_layout.addWidget(self._build_operation_group(), stretch=1)
+            output_layout.addWidget(self._build_logo_settings_group())
+            output_layout.addWidget(self._build_metadata_group())
+            output_layout.addWidget(self._build_output_group())
+            output_layout.addWidget(self._build_progress_group())
+            output_layout.addStretch(1)
+        else:
+            operation_layout.addWidget(self._build_operation_group())
+            operation_layout.addWidget(self._build_metadata_group())
+            operation_layout.addStretch(1)
+            output_layout.addWidget(self._build_output_group())
+            output_layout.addWidget(self._build_progress_group())
+            output_layout.addStretch(1)
 
         splitter.addWidget(import_panel)
         splitter.addWidget(operation_panel)
         splitter.addWidget(output_panel)
-        splitter.setStretchFactor(0, 2)
-        splitter.setStretchFactor(1, 1)
-        splitter.setStretchFactor(2, 1)
-        splitter.setSizes([700, 430, 360])
+        if self.logo_only_mode:
+            splitter.setStretchFactor(0, 2)
+            splitter.setStretchFactor(1, 3)
+            splitter.setStretchFactor(2, 1)
+            splitter.setSizes([520, 760, 360])
+        else:
+            splitter.setStretchFactor(0, 2)
+            splitter.setStretchFactor(1, 1)
+            splitter.setStretchFactor(2, 1)
+            splitter.setSizes([700, 460, 360])
 
         self._apply_styles()
         self._handle_operation_change(0)
         self._refresh_selected_metadata()
+        self._update_logo_pixel_controls()
 
     def _build_import_group(self) -> QGroupBox:
         group = VideoImportGroupBox("1. 视频导入")
@@ -207,33 +301,42 @@ class BatchVideoToolWidget(QWidget):
         return group
 
     def _build_operation_group(self) -> QGroupBox:
-        group = QGroupBox("2. 处理模式")
+        group_title = "3. 预览校准" if self.logo_only_mode else "2. 处理模式"
+        group = QGroupBox(group_title)
         layout = QVBoxLayout(group)
 
-        top_form = QFormLayout()
         self.operation_combo = QComboBox()
-        self.operation_combo.addItem("视频压缩", VideoOperationType.COMPRESS)
-        self.operation_combo.addItem("视频转格式", VideoOperationType.CONVERT)
-        self.operation_combo.addItem("视频时长裁剪", VideoOperationType.TRIM)
-        self.operation_combo.addItem("视频改尺寸", VideoOperationType.RESIZE)
-        self.operation_combo.addItem("视频提取音频", VideoOperationType.EXTRACT_AUDIO)
+        page_builders = {
+            VideoOperationType.COMPRESS: self._build_compress_page,
+            VideoOperationType.CONVERT: self._build_convert_page,
+            VideoOperationType.TRIM: self._build_trim_page,
+            VideoOperationType.RESIZE: self._build_resize_page,
+            VideoOperationType.EXTRACT_AUDIO: self._build_audio_page,
+            VideoOperationType.ADD_LOGO: self._build_logo_page,
+        }
+        for operation in self.available_operations:
+            self.operation_combo.addItem(self._operation_label(operation), operation)
         self.operation_combo.currentIndexChanged.connect(self._handle_operation_change)
-        top_form.addRow("功能", self.operation_combo)
 
         self.operation_stack = QStackedWidget()
-        self.operation_stack.addWidget(self._build_compress_page())
-        self.operation_stack.addWidget(self._build_convert_page())
-        self.operation_stack.addWidget(self._build_trim_page())
-        self.operation_stack.addWidget(self._build_resize_page())
-        self.operation_stack.addWidget(self._build_audio_page())
+        for operation in self.available_operations:
+            self.operation_stack.addWidget(page_builders[operation]())
 
         self.operation_tip_label = QLabel()
         self.operation_tip_label.setWordWrap(True)
         self.operation_tip_label.setObjectName("supportingLabel")
 
-        layout.addLayout(top_form)
-        layout.addWidget(self.operation_stack)
-        layout.addWidget(self.operation_tip_label)
+        if self.logo_only_mode:
+            layout.addWidget(self.operation_stack, stretch=1)
+        else:
+            top_form = QFormLayout()
+            if len(self.available_operations) == 1:
+                top_form.addRow("功能", QLabel(self._operation_label(self.available_operations[0])))
+            else:
+                top_form.addRow("功能", self.operation_combo)
+            layout.addLayout(top_form)
+            layout.addWidget(self.operation_stack)
+            layout.addWidget(self.operation_tip_label)
         return group
 
     def _build_compress_page(self) -> QWidget:
@@ -306,8 +409,74 @@ class BatchVideoToolWidget(QWidget):
         form.addRow("音频格式", self.audio_format_combo)
         return page
 
+    def _build_logo_controls_layout(self, layout: QVBoxLayout) -> None:
+        button_row = QHBoxLayout()
+        choose_logo_button = QPushButton("选择 Logo")
+        choose_logo_button.clicked.connect(self._choose_logo)
+        self.logo_path_edit = QLineEdit()
+        self.logo_path_edit.setReadOnly(True)
+        button_row.addWidget(choose_logo_button)
+        button_row.addWidget(self.logo_path_edit)
+
+        form = QFormLayout()
+        self.logo_corner_label = QLabel(LOGO_ANCHOR_LABELS[self.logo_pixel_placement.anchor])
+        self.logo_x_spin = QSpinBox()
+        self.logo_x_spin.setRange(0, 8192)
+        self.logo_x_spin.setSuffix(" px")
+        self.logo_y_spin = QSpinBox()
+        self.logo_y_spin.setRange(0, 8192)
+        self.logo_y_spin.setSuffix(" px")
+        self.logo_size_spin = QSpinBox()
+        self.logo_size_spin.setRange(1, 8192)
+        self.logo_size_spin.setSuffix(" px")
+        self.logo_keep_ratio_checkbox = QCheckBox("保持 Logo 原比例")
+        self.logo_keep_ratio_checkbox.setChecked(True)
+        self.logo_keep_ratio_checkbox.setEnabled(False)
+        self.logo_keep_ratio_checkbox.setToolTip("v1 固定保持原比例，避免 logo 变形")
+
+        self.logo_x_spin.valueChanged.connect(self._logo_pixel_spinbox_changed)
+        self.logo_y_spin.valueChanged.connect(self._logo_pixel_spinbox_changed)
+        self.logo_size_spin.valueChanged.connect(self._logo_pixel_spinbox_changed)
+
+        form.addRow("自动靠近角", self.logo_corner_label)
+        form.addRow("水平边距", self.logo_x_spin)
+        form.addRow("垂直边距", self.logo_y_spin)
+        form.addRow("Logo 宽度", self.logo_size_spin)
+        form.addRow("渲染方式", self.logo_keep_ratio_checkbox)
+
+        layout.addLayout(button_row)
+        layout.addLayout(form)
+
+    def _build_logo_preview_layout(self, layout: QVBoxLayout) -> None:
+        self.logo_preview_status_label = QLabel("请选择一条视频和一张 Logo，即可直接在下方预览区校准。")
+        self.logo_preview_status_label.setWordWrap(True)
+        self.logo_preview_status_label.setObjectName("supportingLabel")
+
+        self.logo_preview_canvas = VideoLogoPreviewCanvas()
+        self.logo_preview_canvas.setMinimumHeight(300)
+        self.logo_preview_canvas.placement_changed.connect(self._handle_logo_canvas_change)
+
+        layout.addWidget(self.logo_preview_status_label)
+        layout.addWidget(self.logo_preview_canvas, stretch=1)
+
+    def _build_logo_settings_group(self) -> QGroupBox:
+        group = QGroupBox("2. Logo 设置")
+        layout = QVBoxLayout(group)
+        layout.setSpacing(10)
+        self._build_logo_controls_layout(layout)
+        return group
+
+    def _build_logo_page(self) -> QWidget:
+        page = QWidget()
+        layout = QVBoxLayout(page)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(10)
+        self._build_logo_preview_layout(layout)
+        return page
+
     def _build_metadata_group(self) -> QGroupBox:
-        group = QGroupBox("3. 视频信息")
+        title = "当前视频" if self.logo_only_mode else "3. 视频信息"
+        group = QGroupBox(title)
         layout = QFormLayout(group)
 
         self.meta_name_label = QLabel("-")
@@ -332,7 +501,9 @@ class BatchVideoToolWidget(QWidget):
         self.output_dir_button.clicked.connect(self._choose_output_dir)
         self.preserve_structure_checkbox = QCheckBox("导出时保持原文件夹结构")
         self.preserve_structure_checkbox.setChecked(True)
-        self.output_note_label = QLabel("如未设置导出目录，会自动生成 video_output 文件夹。")
+        self.output_note_label = QLabel(
+            "如未设置导出目录，会自动生成 video_output 文件夹。"
+        )
         self.output_note_label.setWordWrap(True)
         self.output_note_label.setObjectName("supportingLabel")
 
@@ -361,16 +532,37 @@ class BatchVideoToolWidget(QWidget):
         layout.addWidget(self.summary_label)
         return group
 
+    def _operation_label(self, operation: VideoOperationType) -> str:
+        labels = {
+            VideoOperationType.COMPRESS: "视频压缩",
+            VideoOperationType.CONVERT: "视频转格式",
+            VideoOperationType.TRIM: "视频时长裁剪",
+            VideoOperationType.RESIZE: "视频改尺寸",
+            VideoOperationType.EXTRACT_AUDIO: "视频提取音频",
+            VideoOperationType.ADD_LOGO: "批量添加 Logo",
+        }
+        return labels[operation]
+
+    def _output_note_text(self, operation: VideoOperationType) -> str:
+        if operation == VideoOperationType.ADD_LOGO:
+            return "如未设置导出目录，会自动生成 video_output 文件夹。批量添加 Logo 默认保持原视频文件名。"
+        if operation == VideoOperationType.EXTRACT_AUDIO:
+            return "如未设置导出目录，会自动生成 video_output 文件夹。提取音频时会按所选格式导出。"
+        return "如未设置导出目录，会自动生成 video_output 文件夹。"
+
     def _handle_operation_change(self, row: int) -> None:
         self.operation_stack.setCurrentIndex(max(0, row))
         tips = {
             VideoOperationType.COMPRESS: "输出 MP4，提供高质量、平衡和高压缩三档预设。",
-            VideoOperationType.CONVERT: "可在 MP4 / MOV / MKV / AVI / WEBM 之间转格式。",
+            VideoOperationType.CONVERT: "可在 MP4 / MOV / MKV / AVI / WEBM 之间转换格式。",
             VideoOperationType.TRIM: "使用 HH:MM:SS 或 HH:MM:SS.mmm 输入开始和结束时间，至少填写一个。",
             VideoOperationType.RESIZE: "支持常用尺寸预设与自定义宽高，默认保持原始比例。",
             VideoOperationType.EXTRACT_AUDIO: "从视频中提取音频，输出 MP3 / WAV / AAC。",
+            VideoOperationType.ADD_LOGO: "先选择一张 Logo，再直接在主界面预览区定位。导出时会批量叠加到所有视频上。",
         }
-        self.operation_tip_label.setText(tips[self.current_operation_type()])
+        operation = self.current_operation_type()
+        self.operation_tip_label.setText(tips[operation])
+        self.output_note_label.setText(self._output_note_text(operation))
 
     def _apply_resize_preset(self) -> None:
         width, height = self.resize_preset_combo.currentData()
@@ -415,7 +607,7 @@ class BatchVideoToolWidget(QWidget):
             QPushButton#primaryRunButton:hover {
                 background: #cf6c2e;
             }
-            QLineEdit, QComboBox, QSpinBox, QTableWidget {
+            QLineEdit, QComboBox, QSpinBox, QDoubleSpinBox, QTableWidget {
                 background: white;
                 border: 1px solid #d8c7aa;
                 border-radius: 9px;
@@ -463,6 +655,14 @@ class BatchVideoToolWidget(QWidget):
             """
         )
 
+    def _create_ratio_spinbox(self, value: float, minimum: float = 0.0) -> QDoubleSpinBox:
+        spinbox = QDoubleSpinBox()
+        spinbox.setDecimals(2)
+        spinbox.setRange(minimum, 100.0)
+        spinbox.setSuffix(" %")
+        spinbox.setValue(value * 100)
+        return spinbox
+
     def _choose_files(self) -> None:
         files, _ = QFileDialog.getOpenFileNames(
             self,
@@ -497,6 +697,20 @@ class BatchVideoToolWidget(QWidget):
         if folder:
             self.output_directory = Path(folder)
             self.output_dir_edit.setText(folder)
+
+    def _choose_logo(self) -> None:
+        file_path, _ = QFileDialog.getOpenFileName(
+            self,
+            "选择 Logo 图片",
+            "",
+            "Images (*.png *.jpg *.jpeg *.webp)",
+        )
+        if not file_path:
+            return
+        self.logo_path = Path(file_path)
+        self.logo_path_edit.setText(str(self.logo_path))
+        self._update_logo_pixel_controls()
+        self._refresh_logo_preview()
 
     def _load_videos(self, raw_paths: list[str]) -> None:
         collected_videos = collect_videos(raw_paths)
@@ -555,15 +769,18 @@ class BatchVideoToolWidget(QWidget):
             self.meta_duration_label.setText("-")
             self.meta_resolution_label.setText("-")
             self.meta_status_label.setText("请先导入并选择一个视频")
+            self._refresh_logo_preview()
             return
 
         self.meta_name_label.setText(item.display_name)
         self.meta_duration_label.setText(item.duration_text)
         self.meta_resolution_label.setText(item.resolution_text)
-        status_text = item.status if item.status != "待处理" or not item.message else "待处理"
+        status_text = item.status
         if item.message:
             status_text = f"{status_text} - {item.message}"
         self.meta_status_label.setText(status_text)
+        self._update_logo_pixel_controls()
+        self._refresh_logo_preview()
 
     def current_operation_type(self) -> VideoOperationType:
         current = self.operation_combo.currentData()
@@ -579,7 +796,21 @@ class BatchVideoToolWidget(QWidget):
             VideoOperationType.TRIM: "_trimmed",
             VideoOperationType.RESIZE: "_resized",
             VideoOperationType.EXTRACT_AUDIO: "_audio",
+            VideoOperationType.ADD_LOGO: "",
         }
+        trim_settings = VideoTrimSettings(
+            start_time=self.trim_start_edit.text().strip() if hasattr(self, "trim_start_edit") else "",
+            end_time=self.trim_end_edit.text().strip() if hasattr(self, "trim_end_edit") else "",
+        )
+        resize_settings = VideoResizeSettings(
+            width=self.resize_width_spin.value() if hasattr(self, "resize_width_spin") else 1280,
+            height=self.resize_height_spin.value() if hasattr(self, "resize_height_spin") else 720,
+            keep_aspect_ratio=(
+                self.resize_keep_aspect_checkbox.isChecked()
+                if hasattr(self, "resize_keep_aspect_checkbox")
+                else True
+            ),
+        )
         return VideoBatchConfig(
             input_files=[item.source_path for item in self.items],
             operation_type=operation_type,
@@ -592,39 +823,172 @@ class BatchVideoToolWidget(QWidget):
                 target_format=VideoContainerFormat.MP4,
             ),
             conversion=VideoConversionSettings(target_format=self.current_conversion_format()),
-            trim=VideoTrimSettings(
-                start_time=self.trim_start_edit.text().strip(),
-                end_time=self.trim_end_edit.text().strip(),
-            ),
-            resize=VideoResizeSettings(
-                width=self.resize_width_spin.value(),
-                height=self.resize_height_spin.value(),
-                keep_aspect_ratio=self.resize_keep_aspect_checkbox.isChecked(),
-            ),
+            trim=trim_settings,
+            resize=resize_settings,
             audio_extract=AudioExtractSettings(target_format=self.current_audio_format()),
+            logo_overlay=VideoLogoSettings(
+                logo_file=self.logo_path,
+                pixel_placement=self.logo_pixel_placement,
+                render_options=self.logo_render_options,
+                use_pixel_positioning=True,
+            ),
         )
 
     def current_compression_preset(self) -> VideoCompressionPreset:
+        if not hasattr(self, "compress_preset_combo"):
+            return VideoCompressionPreset.BALANCED
         current = self.compress_preset_combo.currentData()
         if isinstance(current, VideoCompressionPreset):
             return current
         return VideoCompressionPreset(str(current or VideoCompressionPreset.BALANCED.value))
 
     def current_conversion_format(self) -> VideoContainerFormat:
+        if not hasattr(self, "convert_format_combo"):
+            return VideoContainerFormat.MP4
         current = self.convert_format_combo.currentData()
         if isinstance(current, VideoContainerFormat):
             return current
         return VideoContainerFormat(str(current or VideoContainerFormat.MP4.value))
 
     def current_audio_format(self) -> AudioExportFormat:
+        if not hasattr(self, "audio_format_combo"):
+            return AudioExportFormat.MP3
         current = self.audio_format_combo.currentData()
         if isinstance(current, AudioExportFormat):
             return current
         return AudioExportFormat(str(current or AudioExportFormat.MP3.value))
 
+    def _selected_item(self) -> VideoItem | None:
+        row = self.video_table.currentRow()
+        if 0 <= row < len(self.items):
+            return self.items[row]
+        if self.items:
+            return self.items[0]
+        return None
+
+    def _selected_dimensions(self) -> tuple[int, int] | None:
+        item = self._selected_item()
+        if item and item.width and item.height:
+            return item.width, item.height
+        for candidate in self.items:
+            if candidate.width and candidate.height:
+                return candidate.width, candidate.height
+        return None
+
+    def _logo_dimensions(self) -> tuple[int, int] | None:
+        if self.logo_path is None:
+            return None
+        try:
+            return self.image_processor.get_image_size(self.logo_path)
+        except Exception:  # noqa: BLE001
+            return None
+
+    def _logo_pixel_spinbox_changed(self) -> None:
+        self.logo_pixel_placement = PixelLogoPlacement(
+            margin_x_px=self.logo_x_spin.value(),
+            margin_y_px=self.logo_y_spin.value(),
+            width_px=self.logo_size_spin.value(),
+            anchor=self.logo_pixel_placement.anchor,
+        ).normalized()
+        self._update_logo_pixel_controls()
+
+    def _update_logo_pixel_controls(self) -> None:
+        if not hasattr(self, "logo_x_spin"):
+            return
+        self.logo_x_spin.blockSignals(True)
+        self.logo_y_spin.blockSignals(True)
+        self.logo_size_spin.blockSignals(True)
+        self.logo_x_spin.setValue(self.logo_pixel_placement.margin_x_px)
+        self.logo_y_spin.setValue(self.logo_pixel_placement.margin_y_px)
+        self.logo_size_spin.setValue(self.logo_pixel_placement.width_px)
+        self.logo_corner_label.setText(LOGO_ANCHOR_LABELS.get(self.logo_pixel_placement.anchor, "右下角"))
+        self.logo_x_spin.blockSignals(False)
+        self.logo_y_spin.blockSignals(False)
+        self.logo_size_spin.blockSignals(False)
+        if hasattr(self, "logo_preview_canvas"):
+            self.logo_preview_canvas.set_placement(self.logo_pixel_placement)
+
+    def _handle_logo_canvas_change(self, margin_x_px: int, margin_y_px: int, width_px: int, anchor: str) -> None:
+        self.logo_pixel_placement = PixelLogoPlacement(
+            margin_x_px=margin_x_px,
+            margin_y_px=margin_y_px,
+            width_px=width_px,
+            anchor=anchor,
+        ).normalized()
+        self._update_logo_pixel_controls()
+
+    def _refresh_logo_preview(self) -> None:
+        if not hasattr(self, "logo_preview_canvas"):
+            return
+        item = self._selected_item()
+        if item is None:
+            self.logo_preview_status_label.setText("请选择一条视频和一张 Logo，即可直接在下方预览区校准。")
+            self.logo_preview_canvas.set_images(
+                None,
+                self.logo_path,
+                self.logo_pixel_placement,
+                keep_aspect_ratio=self.logo_render_options.keep_aspect_ratio,
+            )
+            return
+
+        timestamp_seconds = min(1.0, max(0.0, (item.duration_seconds or 0.0) / 2.0))
+        try:
+            frame_path = self.processor.extract_preview_frame(item.source_path, timestamp_seconds=timestamp_seconds)
+        except Exception as exc:  # noqa: BLE001
+            self.logo_preview_status_label.setText(f"预览生成失败: {exc}")
+            self.logo_preview_canvas.set_images(
+                None,
+                self.logo_path,
+                self.logo_pixel_placement,
+                keep_aspect_ratio=self.logo_render_options.keep_aspect_ratio,
+            )
+            return
+
+        if self.logo_path is None:
+            self.logo_preview_status_label.setText(f"当前预览: {item.display_name}。选择一张 Logo 后即可直接拖动校准。")
+        else:
+            self.logo_preview_status_label.setText(f"当前预览: {item.display_name}。拖动 Logo 或修改像素值会立即同步。")
+        self.logo_preview_canvas.set_images(
+            frame_path,
+            self.logo_path,
+            self.logo_pixel_placement,
+            keep_aspect_ratio=self.logo_render_options.keep_aspect_ratio,
+        )
+
+    def _open_logo_preview(self) -> None:
+        item = self._selected_item()
+        if item is None:
+            QMessageBox.information(self, "未选择视频", "请先在左侧列表中选中一个视频。")
+            return
+        if self.logo_path is None:
+            QMessageBox.information(self, "缺少 Logo", "请先选择一张 Logo 图片。")
+            return
+
+        timestamp_seconds = min(1.0, max(0.0, (item.duration_seconds or 0.0) / 2.0))
+        try:
+            frame_path = self.processor.extract_preview_frame(item.source_path, timestamp_seconds=timestamp_seconds)
+        except Exception as exc:  # noqa: BLE001
+            QMessageBox.critical(self, "生成预览失败", str(exc))
+            return
+
+        dialog = VideoLogoPreviewDialog(
+            frame_path=frame_path,
+            logo_path=self.logo_path,
+            placement=self.logo_pixel_placement,
+            keep_aspect_ratio=self.logo_render_options.keep_aspect_ratio,
+            parent=self,
+        )
+        if dialog.exec() == QDialog.DialogCode.Accepted:
+            self.logo_pixel_placement = dialog.placement.normalized()
+            self._update_logo_pixel_controls()
+            self.summary_label.setText("已更新视频 Logo 的位置和大小")
+
     def _run_batch(self) -> None:
         if not self.items:
             QMessageBox.warning(self, "缺少视频", "请先导入视频。")
+            return
+        if self.current_operation_type() == VideoOperationType.ADD_LOGO and self.logo_path is None:
+            QMessageBox.warning(self, "缺少 Logo", "请先选择一张 Logo 图片。")
             return
 
         config = self.current_config()
@@ -700,14 +1064,6 @@ class BatchVideoToolWidget(QWidget):
                 self.summary_label.setText("视频列表已清空")
             self._refresh_selected_metadata()
 
-    def _selected_item(self) -> VideoItem | None:
-        row = self.video_table.currentRow()
-        if 0 <= row < len(self.items):
-            return self.items[row]
-        if self.items:
-            return self.items[0]
-        return None
-
     def _open_output_directory(self, output_directory: Path) -> None:
         if not output_directory.exists():
             return
@@ -715,3 +1071,6 @@ class BatchVideoToolWidget(QWidget):
             os.startfile(str(output_directory))
         except OSError:
             pass
+
+
+

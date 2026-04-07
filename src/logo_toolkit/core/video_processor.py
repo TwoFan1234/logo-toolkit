@@ -1,8 +1,12 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
+import hashlib
 import re
+import tempfile
 from pathlib import Path
 from typing import Any, Callable
+
+from PIL import Image
 
 from logo_toolkit.core.models import (
     AudioExportFormat,
@@ -40,6 +44,18 @@ class VideoProcessor:
             width=width,
             height=height,
         )
+
+    def extract_preview_frame(self, source_path: Path, timestamp_seconds: float = 0.0) -> Path:
+        self.validate_video(source_path)
+        stat = source_path.stat()
+        fingerprint = hashlib.sha1(
+            f"{source_path.resolve()}::{stat.st_mtime_ns}::{timestamp_seconds:.3f}".encode("utf-8")
+        ).hexdigest()
+        cache_dir = Path(tempfile.gettempdir()) / "logo_toolkit" / "video_previews"
+        preview_path = cache_dir / f"{fingerprint}.png"
+        if not preview_path.exists():
+            self.backend.extract_frame(source_path, preview_path, timestamp_seconds=timestamp_seconds)
+        return preview_path
 
     def validate_video(self, source_path: Path) -> None:
         if source_path.suffix.lower() not in SUPPORTED_VIDEO_EXTENSIONS:
@@ -107,6 +123,10 @@ class VideoProcessor:
         output_directory: Path | None,
         source_root: Path | None = None,
     ) -> Path:
+        self.validate_video(source_path)
+        if config.operation_type == VideoOperationType.ADD_LOGO and config.logo_overlay.logo_file is None:
+            raise ValueError("请先选择一张 Logo 图片。")
+
         output_path = self.build_output_path(
             source_path=source_path,
             operation_type=config.operation_type,
@@ -170,7 +190,10 @@ class VideoProcessor:
             codec_args = self._audio_codec_arguments(config.audio_extract)
             return ["-y", "-i", str(source_path), "-vn", *codec_args, str(output_path)]
 
-        raise ValueError(f"未知的视频操作: {operation}")
+        if operation == VideoOperationType.ADD_LOGO:
+            return self._build_add_logo_arguments(source_path, output_path, config)
+
+        raise ValueError(f"未知的视频处理类型: {operation}")
 
     def resolve_output_directory(self, config: VideoBatchConfig) -> Path:
         if config.output_directory:
@@ -277,6 +300,85 @@ class VideoProcessor:
             raise ValueError("关闭保持比例时必须同时填写宽度和高度。")
         return f"scale={width}:{height}"
 
+    def _build_add_logo_arguments(
+        self,
+        source_path: Path,
+        output_path: Path,
+        config: VideoBatchConfig,
+    ) -> list[str]:
+        logo_path = config.logo_overlay.logo_file
+        if logo_path is None:
+            raise ValueError("请先选择一张 Logo 图片。")
+        target_x, target_y, target_width, target_height = self._logo_overlay_geometry(
+            source_path=source_path,
+            logo_path=logo_path,
+            config=config,
+        )
+        filter_complex = (
+            f"[1:v]scale={target_width}:{target_height}[logo];"
+            f"[0:v][logo]overlay={target_x}:{target_y}[outv]"
+        )
+        codec_args = self._codec_arguments_for_suffix(output_path.suffix.lower())
+        arguments = [
+            "-y",
+            "-i",
+            str(source_path),
+            "-i",
+            str(logo_path),
+            "-filter_complex",
+            filter_complex,
+            "-map",
+            "[outv]",
+            "-map",
+            "0:a?",
+            *codec_args,
+        ]
+        if output_path.suffix.lower() in {".mp4", ".mov", ".m4v"}:
+            arguments.extend(["-movflags", "+faststart"])
+        arguments.append(str(output_path))
+        return arguments
+
+    def _logo_overlay_geometry(
+        self,
+        source_path: Path,
+        logo_path: Path,
+        config: VideoBatchConfig,
+    ) -> tuple[int, int, int, int]:
+        metadata = self.get_video_metadata(source_path)
+        if not metadata.width or not metadata.height:
+            raise ValueError("无法读取视频分辨率，不能计算 Logo 位置。")
+
+        with Image.open(logo_path) as image:
+            logo_width, logo_height = image.size
+        if logo_width <= 0 or logo_height <= 0:
+            raise ValueError("Logo 图片尺寸无效。")
+
+        if config.logo_overlay.use_pixel_positioning:
+            pixel_placement = config.logo_overlay.pixel_placement.normalized()
+            target_x, target_y, target_width, target_height = pixel_placement.to_overlay_box(
+                frame_width=metadata.width,
+                frame_height=metadata.height,
+                logo_width=logo_width,
+                logo_height=logo_height,
+                keep_aspect_ratio=config.logo_overlay.render_options.keep_aspect_ratio,
+            )
+        else:
+            placement = config.logo_overlay.placement.normalized()
+            target_x, target_y, target_width, target_height = placement.to_overlay_box(
+                frame_width=metadata.width,
+                frame_height=metadata.height,
+                logo_width=logo_width,
+                logo_height=logo_height,
+                keep_aspect_ratio=config.logo_overlay.render_options.keep_aspect_ratio,
+                reference_mode=config.logo_overlay.render_options.reference_mode,
+            )
+        return (
+            int(round(target_x)),
+            int(round(target_y)),
+            int(round(target_width)),
+            int(round(target_height)),
+        )
+
     def _compression_crf(self, preset: VideoCompressionPreset) -> str:
         if preset == VideoCompressionPreset.HIGH_QUALITY:
             return "23"
@@ -312,3 +414,5 @@ class VideoProcessor:
             return float(value)
         except (TypeError, ValueError):
             return None
+
+

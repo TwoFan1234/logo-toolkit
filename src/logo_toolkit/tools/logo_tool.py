@@ -9,7 +9,6 @@ from PySide6.QtWidgets import (
     QAbstractItemView,
     QCheckBox,
     QComboBox,
-    QDoubleSpinBox,
     QFileDialog,
     QFormLayout,
     QFrame,
@@ -26,6 +25,7 @@ from PySide6.QtWidgets import (
     QProgressDialog,
     QPushButton,
     QSplitter,
+    QSpinBox,
     QTableWidget,
     QTableWidgetItem,
     QTreeView,
@@ -40,11 +40,12 @@ from logo_toolkit.core.models import (
     ExportMode,
     ImageItem,
     LogoPlacement,
+    PixelLogoPlacement,
     RenderOptions,
     TemplatePreset,
 )
 from logo_toolkit.core.preset_store import TemplatePresetStore
-from logo_toolkit.ui.preview_canvas import PreviewCanvas
+from logo_toolkit.ui.video_logo_preview_canvas import VideoLogoPreviewCanvas
 
 
 class ImportGroupBox(QGroupBox):
@@ -111,6 +112,7 @@ class BatchLogoToolWidget(QWidget):
         self.logo_path: Path | None = None
         self.output_directory: Path | None = None
         self.placement = LogoPlacement()
+        self.pixel_placement = PixelLogoPlacement(margin_x_px=40, margin_y_px=40, width_px=220, anchor="top_left")
         self.render_options = RenderOptions()
         self.thumbnail_size = QSize(72, 72)
         self._build_ui()
@@ -247,28 +249,29 @@ class BatchLogoToolWidget(QWidget):
         button_row.addWidget(self.logo_path_edit)
 
         form = QFormLayout()
-        self.x_spin = self._create_ratio_spinbox(self.placement.x_ratio)
-        self.y_spin = self._create_ratio_spinbox(self.placement.y_ratio)
-        self.size_spin = self._create_ratio_spinbox(self.placement.width_ratio, minimum=0.01)
-        self.margin_spin = QDoubleSpinBox()
-        self.margin_spin.setRange(0.0, 40.0)
-        self.margin_spin.setDecimals(1)
-        self.margin_spin.setValue(0.0)
-        self.margin_spin.setSuffix(" %")
+        self.corner_label = QLabel("左上角")
+        self.x_spin = QSpinBox()
+        self.x_spin.setRange(0, 8192)
+        self.x_spin.setSuffix(" px")
+        self.y_spin = QSpinBox()
+        self.y_spin.setRange(0, 8192)
+        self.y_spin.setSuffix(" px")
+        self.size_spin = QSpinBox()
+        self.size_spin.setRange(1, 8192)
+        self.size_spin.setSuffix(" px")
         self.keep_ratio_checkbox = QCheckBox("保持 Logo 原比例")
         self.keep_ratio_checkbox.setChecked(True)
         self.keep_ratio_checkbox.setEnabled(False)
         self.keep_ratio_checkbox.setToolTip("v1 固定保持原比例，避免 logo 变形")
 
-        self.x_spin.valueChanged.connect(self._spinbox_changed)
-        self.y_spin.valueChanged.connect(self._spinbox_changed)
-        self.size_spin.valueChanged.connect(self._spinbox_changed)
-        self.margin_spin.valueChanged.connect(self._spinbox_changed)
+        self.x_spin.valueChanged.connect(self._pixel_spinbox_changed)
+        self.y_spin.valueChanged.connect(self._pixel_spinbox_changed)
+        self.size_spin.valueChanged.connect(self._pixel_spinbox_changed)
 
-        form.addRow("X 位置", self.x_spin)
-        form.addRow("Y 位置", self.y_spin)
+        form.addRow("自动靠近角", self.corner_label)
+        form.addRow("水平边距", self.x_spin)
+        form.addRow("垂直边距", self.y_spin)
         form.addRow("Logo 宽度", self.size_spin)
-        form.addRow("边距", self.margin_spin)
         form.addRow("渲染方式", self.keep_ratio_checkbox)
 
         layout.addLayout(button_row)
@@ -337,12 +340,12 @@ class BatchLogoToolWidget(QWidget):
         title_row.addWidget(preview_badge)
         title_row.addStretch(1)
 
-        tips = QLabel("拖动 Logo 调整位置，拖动右下角控制点缩放大小。数值输入与画布会双向同步。")
+        tips = QLabel("拖动 Logo 调整位置，拖动右下角控制点缩放大小。像素输入与画布会双向同步。")
         tips.setWordWrap(True)
         tips.setObjectName("previewTips")
 
-        self.preview_canvas = PreviewCanvas()
-        self.preview_canvas.placement_changed.connect(self._handle_canvas_placement_change)
+        self.preview_canvas = VideoLogoPreviewCanvas()
+        self.preview_canvas.placement_changed.connect(self._handle_canvas_pixel_change)
 
         layout.addLayout(title_row)
         layout.addWidget(tips)
@@ -386,7 +389,7 @@ class BatchLogoToolWidget(QWidget):
             QPushButton#primaryRunButton:hover {
                 background: #cf6c2e;
             }
-            QLineEdit, QComboBox, QDoubleSpinBox, QTableWidget {
+            QLineEdit, QComboBox, QSpinBox, QDoubleSpinBox, QTableWidget {
                 background: white;
                 border: 1px solid #d8c7aa;
                 border-radius: 9px;
@@ -460,14 +463,6 @@ class BatchLogoToolWidget(QWidget):
             """
         )
 
-    def _create_ratio_spinbox(self, value: float, minimum: float = 0.0) -> QDoubleSpinBox:
-        spinbox = QDoubleSpinBox()
-        spinbox.setDecimals(2)
-        spinbox.setRange(minimum, 100.0)
-        spinbox.setSuffix(" %")
-        spinbox.setValue(value * 100)
-        return spinbox
-
     def _load_presets(self) -> None:
         self.presets = self.preset_store.load_presets()
         self._refresh_preset_combo()
@@ -485,14 +480,17 @@ class BatchLogoToolWidget(QWidget):
         self.preset_combo.blockSignals(False)
 
     def _current_preset(self, name: str) -> TemplatePreset:
+        legacy_placement = self._legacy_ratio_placement_from_pixel()
         return TemplatePreset(
             name=name,
             logo_path=self.logo_path,
             output_directory=self.output_directory,
-            margin_ratio=self.margin_spin.value() / 100.0,
+            margin_ratio=0.0,
             export_mode=self.current_export_mode(),
             preserve_structure=self.preserve_structure_checkbox.isChecked(),
-            placement=self.placement,
+            placement=legacy_placement,
+            pixel_placement=self.pixel_placement,
+            use_pixel_positioning=True,
         )
 
     def _save_current_template(self) -> None:
@@ -526,8 +524,11 @@ class BatchLogoToolWidget(QWidget):
             return
 
         self.preset_name_edit.setText(preset.name)
+        if preset.use_pixel_positioning:
+            self.pixel_placement = preset.pixel_placement.normalized()
+        else:
+            self.pixel_placement = self._pixel_placement_from_ratio(preset.placement)
         self.placement = preset.placement.normalized()
-        self.margin_spin.setValue(preset.margin_ratio * 100)
         self.export_mode_combo.setCurrentIndex(self.export_mode_combo.findData(preset.export_mode))
         self.preserve_structure_checkbox.setChecked(preset.preserve_structure)
         self.output_directory = preset.output_directory
@@ -541,8 +542,9 @@ class BatchLogoToolWidget(QWidget):
             self.logo_path_edit.clear()
             QMessageBox.information(self, "Logo 路径不存在", f"模板中的 logo 文件不存在: {preset.logo_path}")
 
-        self.placement = self._bounded_placement(self.placement)
-        self._update_spinboxes_from_placement()
+        self.pixel_placement = self._bounded_pixel_placement(self.pixel_placement)
+        self._sync_legacy_ratio_from_pixel()
+        self._update_spinboxes_from_pixel()
         self._refresh_preview()
         self.summary_label.setText(f"已套用模板: {preset.name}")
 
@@ -584,7 +586,12 @@ class BatchLogoToolWidget(QWidget):
         self.image_table.setRowCount(0)
         self.progress_bar.setValue(0)
         self.summary_label.setText("已清空图片列表")
-        self.preview_canvas.set_images(None, self.logo_path, self.placement)
+        self.preview_canvas.set_images(
+            None,
+            self.logo_path,
+            self.pixel_placement,
+            keep_aspect_ratio=self.render_options.keep_aspect_ratio,
+        )
 
     def _choose_logo(self) -> None:
         file_path, _ = QFileDialog.getOpenFileName(
@@ -597,8 +604,9 @@ class BatchLogoToolWidget(QWidget):
             return
         self.logo_path = Path(file_path)
         self.logo_path_edit.setText(str(self.logo_path))
-        self.placement = self._bounded_placement(self.placement)
-        self._update_spinboxes_from_placement()
+        self.pixel_placement = self._bounded_pixel_placement(self.pixel_placement)
+        self._sync_legacy_ratio_from_pixel()
+        self._update_spinboxes_from_pixel()
         self._refresh_preview()
 
     def _choose_output_dir(self) -> None:
@@ -634,8 +642,9 @@ class BatchLogoToolWidget(QWidget):
         self.summary_label.setText(f"已载入 {len(self.items)} 张图片")
         if self.image_table.rowCount() > 0 and self.image_table.currentRow() < 0:
             self.image_table.selectRow(0)
-        self.placement = self._bounded_placement(self.placement)
-        self._update_spinboxes_from_placement()
+        self.pixel_placement = self._bounded_pixel_placement(self.pixel_placement)
+        self._sync_legacy_ratio_from_pixel()
+        self._update_spinboxes_from_pixel()
         self._refresh_preview()
 
     def _create_thumbnail_item(self, image_path: Path) -> QTableWidgetItem:
@@ -676,38 +685,61 @@ class BatchLogoToolWidget(QWidget):
             self.image_table.setItem(row, 5, message_item)
 
     def _sync_preview_from_selection(self) -> None:
-        self.placement = self._bounded_placement(self.placement)
-        self._update_spinboxes_from_placement()
+        self.pixel_placement = self._bounded_pixel_placement(self.pixel_placement)
+        self._sync_legacy_ratio_from_pixel()
+        self._update_spinboxes_from_pixel()
         self._refresh_preview()
 
     def _refresh_preview(self) -> None:
         image_path = self._selected_image_path()
-        self.preview_canvas.set_images(image_path, self.logo_path, self.placement)
-
-    def _spinbox_changed(self) -> None:
-        placement = LogoPlacement(
-            x_ratio=self.x_spin.value() / 100.0,
-            y_ratio=self.y_spin.value() / 100.0,
-            width_ratio=max(self.size_spin.value() / 100.0, 0.01),
+        self.preview_canvas.set_images(
+            image_path,
+            self.logo_path,
+            self.pixel_placement,
+            keep_aspect_ratio=self.render_options.keep_aspect_ratio,
         )
-        self.placement = self._bounded_placement(placement)
-        self._update_spinboxes_from_placement()
-        self.preview_canvas.set_placement(self.placement)
 
-    def _handle_canvas_placement_change(self, x_ratio: float, y_ratio: float, width_ratio: float) -> None:
-        self.placement = self._bounded_placement(
-            LogoPlacement(x_ratio=x_ratio, y_ratio=y_ratio, width_ratio=width_ratio)
+    def _pixel_spinbox_changed(self) -> None:
+        self.pixel_placement = self._bounded_pixel_placement(
+            PixelLogoPlacement(
+                margin_x_px=self.x_spin.value(),
+                margin_y_px=self.y_spin.value(),
+                width_px=self.size_spin.value(),
+                anchor=self.pixel_placement.anchor,
+            )
         )
-        self._update_spinboxes_from_placement()
-        self.preview_canvas.set_placement(self.placement)
+        self._sync_legacy_ratio_from_pixel()
+        self._update_spinboxes_from_pixel()
+        self.preview_canvas.set_placement(self.pixel_placement)
 
-    def _update_spinboxes_from_placement(self) -> None:
+    def _handle_canvas_pixel_change(self, margin_x_px: int, margin_y_px: int, width_px: int, anchor: str) -> None:
+        self.pixel_placement = self._bounded_pixel_placement(
+            PixelLogoPlacement(
+                margin_x_px=margin_x_px,
+                margin_y_px=margin_y_px,
+                width_px=width_px,
+                anchor=anchor,
+            )
+        )
+        self._sync_legacy_ratio_from_pixel()
+        self._update_spinboxes_from_pixel()
+        self.preview_canvas.set_placement(self.pixel_placement)
+
+    def _update_spinboxes_from_pixel(self) -> None:
         self.x_spin.blockSignals(True)
         self.y_spin.blockSignals(True)
         self.size_spin.blockSignals(True)
-        self.x_spin.setValue(self.placement.x_ratio * 100)
-        self.y_spin.setValue(self.placement.y_ratio * 100)
-        self.size_spin.setValue(self.placement.width_ratio * 100)
+        self.x_spin.setValue(self.pixel_placement.margin_x_px)
+        self.y_spin.setValue(self.pixel_placement.margin_y_px)
+        self.size_spin.setValue(self.pixel_placement.width_px)
+        self.corner_label.setText(
+            {
+                "top_left": "左上角",
+                "top_right": "右上角",
+                "bottom_left": "左下角",
+                "bottom_right": "右下角",
+            }.get(self.pixel_placement.anchor, "左上角")
+        )
         self.x_spin.blockSignals(False)
         self.y_spin.blockSignals(False)
         self.size_spin.blockSignals(False)
@@ -749,6 +781,8 @@ class BatchLogoToolWidget(QWidget):
             logo_file=self.logo_path,
             placement=self.placement,
             render_options=self.render_options,
+            pixel_placement=self.pixel_placement,
+            use_pixel_positioning=True,
             export_mode=export_mode,
             output_directory=self.output_directory if export_mode == ExportMode.NEW_FOLDER else None,
             output_suffix="",
@@ -851,23 +885,84 @@ class BatchLogoToolWidget(QWidget):
         except Exception:  # noqa: BLE001
             return None
 
-    def _bounded_placement(self, placement: LogoPlacement) -> LogoPlacement:
+    def _bounded_pixel_placement(self, placement: PixelLogoPlacement) -> PixelLogoPlacement:
         normalized = placement.normalized()
-        margin = self.margin_spin.value() / 100.0 if hasattr(self, "margin_spin") else 0.0
-        width_ratio = min(normalized.width_ratio, max(0.01, 1.0 - margin * 2))
-        x_ratio = min(max(normalized.x_ratio, margin), max(margin, 1.0 - width_ratio - margin))
-        y_ratio = max(normalized.y_ratio, margin)
-
         image_size = self._selected_dimensions()
         logo_size = self._logo_dimensions()
-        if image_size and logo_size:
-            base_width, base_height = image_size
-            logo_width, logo_height = logo_size
-            if base_height > 0 and logo_width > 0:
-                height_ratio = width_ratio * (logo_height / logo_width) * (base_width / base_height)
-                y_ratio = min(max(y_ratio, margin), max(margin, 1.0 - height_ratio - margin))
+        if not image_size or not logo_size:
+            return normalized
 
-        return LogoPlacement(x_ratio=x_ratio, y_ratio=y_ratio, width_ratio=width_ratio)
+        frame_width, frame_height = image_size
+        logo_width, logo_height = logo_size
+        left, top, overlay_width, overlay_height = normalized.to_overlay_box(
+            frame_width=frame_width,
+            frame_height=frame_height,
+            logo_width=logo_width,
+            logo_height=logo_height,
+            keep_aspect_ratio=self.render_options.keep_aspect_ratio,
+        )
+        return PixelLogoPlacement.auto_from_overlay_box(
+            left=left,
+            top=top,
+            overlay_width=overlay_width,
+            overlay_height=overlay_height,
+            frame_width=frame_width,
+            frame_height=frame_height,
+        )
+
+    def _legacy_ratio_placement_from_pixel(self) -> LogoPlacement:
+        image_size = self._selected_dimensions()
+        logo_size = self._logo_dimensions()
+        if not image_size or not logo_size:
+            return self.placement.normalized()
+
+        frame_width, frame_height = image_size
+        logo_width, logo_height = logo_size
+        left, top, overlay_width, overlay_height = self.pixel_placement.to_overlay_box(
+            frame_width=frame_width,
+            frame_height=frame_height,
+            logo_width=logo_width,
+            logo_height=logo_height,
+            keep_aspect_ratio=self.render_options.keep_aspect_ratio,
+        )
+        return LogoPlacement.from_overlay_box(
+            left=left,
+            top=top,
+            overlay_width=overlay_width,
+            overlay_height=overlay_height,
+            frame_width=frame_width,
+            frame_height=frame_height,
+            anchor=self.pixel_placement.anchor,
+            reference_mode=self.render_options.reference_mode,
+        )
+
+    def _sync_legacy_ratio_from_pixel(self) -> None:
+        self.placement = self._legacy_ratio_placement_from_pixel()
+
+    def _pixel_placement_from_ratio(self, placement: LogoPlacement) -> PixelLogoPlacement:
+        image_size = self._selected_dimensions()
+        logo_size = self._logo_dimensions()
+        if not image_size or not logo_size:
+            return self.pixel_placement.normalized()
+
+        frame_width, frame_height = image_size
+        logo_width, logo_height = logo_size
+        left, top, overlay_width, overlay_height = placement.normalized().to_overlay_box(
+            frame_width=frame_width,
+            frame_height=frame_height,
+            logo_width=logo_width,
+            logo_height=logo_height,
+            keep_aspect_ratio=self.render_options.keep_aspect_ratio,
+            reference_mode=self.render_options.reference_mode,
+        )
+        return PixelLogoPlacement.auto_from_overlay_box(
+            left=left,
+            top=top,
+            overlay_width=overlay_width,
+            overlay_height=overlay_height,
+            frame_width=frame_width,
+            frame_height=frame_height,
+        )
 
     def _build_output_summary_text(self, export_mode: ExportMode, config: BatchJobConfig) -> str:
         if export_mode == ExportMode.OVERWRITE:
