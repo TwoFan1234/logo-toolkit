@@ -44,6 +44,12 @@ def build_tool_registry() -> list[ToolDefinition]:
             factory=lambda: BatchVideoToolWidget(available_operations=[VideoOperationType.ADD_LOGO]),
         ),
         ToolDefinition(
+            tool_id="batch_video_endcard",
+            title="批量加 EC",
+            description="给整批视频统一叠加透明 MOV 结尾视频，并自动处理尾部重叠和音频过渡。",
+            factory=lambda: BatchVideoToolWidget(available_operations=[VideoOperationType.ADD_ENDCARD]),
+        ),
+        ToolDefinition(
             tool_id="batch_video_frame",
             title="视频套边框",
             description="把视频叠到边框图片上，批量生成 16:9、1:1、9:16 等尺寸版本。",

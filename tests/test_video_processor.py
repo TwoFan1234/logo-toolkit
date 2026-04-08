@@ -13,7 +13,9 @@ from logo_toolkit.core.models import (
     RenderOptions,
     VideoBatchConfig,
     VideoContainerFormat,
+    VideoEndCardAlphaMode,
     VideoConversionSettings,
+    VideoEndCardSettings,
     VideoLogoSettings,
     VideoOperationType,
     VideoResizeSettings,
@@ -326,6 +328,295 @@ def test_build_add_logo_command_supports_pixel_logo_geometry(tmp_path: Path) -> 
 
     filter_text = arguments[arguments.index("-filter_complex") + 1]
     assert filter_text == "[1:v]scale=280:140[logo];[0:v][logo]overlay=1616:908[outv]"
+
+
+def test_build_add_endcard_command_supports_overlap_and_audio_crossfade(tmp_path: Path) -> None:
+    source = tmp_path / "sample.mp4"
+    source.write_bytes(b"video")
+    endcard = tmp_path / "endcard.mov"
+    endcard.write_bytes(b"video")
+    backend = FakeVideoBackend(
+        probe_payloads={
+            source: {
+                "format": {"duration": "10.0"},
+                "streams": [
+                    {"codec_type": "video", "width": 1920, "height": 1080},
+                    {"codec_type": "audio"},
+                ],
+            },
+            endcard: {
+                "format": {"duration": "3.0"},
+                "streams": [
+                    {"codec_type": "video", "width": 1080, "height": 1920},
+                    {"codec_type": "audio"},
+                ],
+            },
+        }
+    )
+    processor = VideoProcessor(backend=backend)
+    output = tmp_path / "sample.mp4"
+    config = VideoBatchConfig(
+        input_files=[source],
+        operation_type=VideoOperationType.ADD_ENDCARD,
+        endcard=VideoEndCardSettings(
+            endcard_file=endcard,
+            overlap_seconds=1.5,
+            audio_crossfade_seconds=0.5,
+            alpha_mode=VideoEndCardAlphaMode.PREMIERE_COMPAT,
+        ),
+    )
+
+    arguments = processor.build_ffmpeg_arguments(source, output, config)
+
+    assert arguments[:5] == ["-y", "-i", str(source), "-i", str(endcard)]
+    assert arguments[-1] == str(output)
+    assert arguments[arguments.index("-map") + 1] == "[outv]"
+    assert "[outa]" in arguments
+
+    filter_text = arguments[arguments.index("-filter_complex") + 1]
+    assert "[0:v]setpts=PTS-STARTPTS,format=rgba,tpad=stop_mode=clone:stop_duration=1.500[basev]" in filter_text
+    assert (
+        "[1:v]format=rgba,geq="
+        "r='if(gt(alpha(X,Y),0),min(255,r(X,Y)*255/alpha(X,Y)),0)':"
+        "g='if(gt(alpha(X,Y),0),min(255,g(X,Y)*255/alpha(X,Y)),0)':"
+        "b='if(gt(alpha(X,Y),0),min(255,b(X,Y)*255/alpha(X,Y)),0)':"
+        "a='alpha(X,Y)',scale=1920:1080,setpts=PTS-STARTPTS+8.500/TB[endv]"
+    ) in filter_text
+    assert "[basev][endv]overlay=0:0:eof_action=pass:format=rgb:alpha=straight[outv]" in filter_text
+    assert "[0:a]asetpts=PTS-STARTPTS,afade=t=out:st=8.500:d=0.500[sourcea]" in filter_text
+    assert "[1:a]adelay=8500:all=1,afade=t=in:st=8.500:d=0.500[endcarda]" in filter_text
+    assert "[sourcea][endcarda]amix=inputs=2:duration=longest:dropout_transition=0[outa]" in filter_text
+    assert "-pix_fmt" in arguments
+    assert arguments[arguments.index("-pix_fmt") + 1] == "yuv420p"
+
+
+def test_build_add_endcard_command_supports_direct_alpha_mode(tmp_path: Path) -> None:
+    source = tmp_path / "sample.mp4"
+    source.write_bytes(b"video")
+    endcard = tmp_path / "endcard.mov"
+    endcard.write_bytes(b"video")
+    backend = FakeVideoBackend(
+        probe_payloads={
+            source: {
+                "format": {"duration": "10.0"},
+                "streams": [{"codec_type": "video", "width": 1920, "height": 1080}],
+            },
+            endcard: {
+                "format": {"duration": "3.0"},
+                "streams": [{"codec_type": "video", "width": 1080, "height": 1920}],
+            },
+        }
+    )
+    processor = VideoProcessor(backend=backend)
+    config = VideoBatchConfig(
+        input_files=[source],
+        operation_type=VideoOperationType.ADD_ENDCARD,
+        endcard=VideoEndCardSettings(
+            endcard_file=endcard,
+            overlap_seconds=1.5,
+            audio_crossfade_seconds=0.5,
+            alpha_mode=VideoEndCardAlphaMode.DIRECT,
+        ),
+    )
+
+    arguments = processor.build_ffmpeg_arguments(source, tmp_path / "output.mp4", config)
+    filter_text = arguments[arguments.index("-filter_complex") + 1]
+
+    assert "[1:v]format=rgba,scale=1920:1080,setpts=PTS-STARTPTS+8.500/TB[endv]" in filter_text
+    assert "geq=" not in filter_text
+
+
+def test_build_add_endcard_output_uses_mp4_extension(tmp_path: Path) -> None:
+    processor = VideoProcessor(backend=FakeVideoBackend())
+    source = tmp_path / "sample.mov"
+    config = VideoBatchConfig(
+        input_files=[source],
+        operation_type=VideoOperationType.ADD_ENDCARD,
+        endcard=VideoEndCardSettings(endcard_file=tmp_path / "endcard.mov"),
+    )
+
+    output_path = processor.build_output_path(
+        source_path=source,
+        operation_type=config.operation_type,
+        output_directory=tmp_path / "exports",
+        output_suffix="",
+        preserve_structure=False,
+        source_root=None,
+        config=config,
+    )
+
+    assert output_path.name == "sample.mp4"
+
+
+def test_build_add_endcard_overlap_clamps_to_source_duration(tmp_path: Path) -> None:
+    source = tmp_path / "source.mp4"
+    source.write_bytes(b"video")
+    endcard = tmp_path / "endcard.mov"
+    endcard.write_bytes(b"video")
+    backend = FakeVideoBackend(
+        probe_payloads={
+            source: {
+                "format": {"duration": "2.0"},
+                "streams": [{"codec_type": "video", "width": 1280, "height": 720}],
+            },
+            endcard: {
+                "format": {"duration": "4.0"},
+                "streams": [{"codec_type": "video", "width": 1280, "height": 720}],
+            },
+        }
+    )
+    processor = VideoProcessor(backend=backend)
+    config = VideoBatchConfig(
+        input_files=[source],
+        operation_type=VideoOperationType.ADD_ENDCARD,
+        endcard=VideoEndCardSettings(
+            endcard_file=endcard,
+            overlap_seconds=3.0,
+            audio_crossfade_seconds=1.2,
+        ),
+    )
+
+    arguments = processor.build_ffmpeg_arguments(source, tmp_path / "output.mp4", config)
+    filter_text = arguments[arguments.index("-filter_complex") + 1]
+
+    assert "tpad=stop_mode=clone:stop_duration=2.000" in filter_text
+    assert "setpts=PTS-STARTPTS+0.000/TB[endv]" in filter_text
+
+
+def test_build_add_endcard_overlap_clamps_to_endcard_duration(tmp_path: Path) -> None:
+    source = tmp_path / "source.mp4"
+    source.write_bytes(b"video")
+    endcard = tmp_path / "endcard.mov"
+    endcard.write_bytes(b"video")
+    backend = FakeVideoBackend(
+        probe_payloads={
+            source: {
+                "format": {"duration": "6.0"},
+                "streams": [{"codec_type": "video", "width": 1280, "height": 720}],
+            },
+            endcard: {
+                "format": {"duration": "1.25"},
+                "streams": [{"codec_type": "video", "width": 1280, "height": 720}],
+            },
+        }
+    )
+    processor = VideoProcessor(backend=backend)
+    config = VideoBatchConfig(
+        input_files=[source],
+        operation_type=VideoOperationType.ADD_ENDCARD,
+        endcard=VideoEndCardSettings(
+            endcard_file=endcard,
+            overlap_seconds=3.0,
+            audio_crossfade_seconds=2.0,
+        ),
+    )
+
+    arguments = processor.build_ffmpeg_arguments(source, tmp_path / "output.mp4", config)
+    filter_text = arguments[arguments.index("-filter_complex") + 1]
+
+    assert "tpad=stop_mode=clone:stop_duration=0.000" in filter_text
+    assert "setpts=PTS-STARTPTS+4.750/TB[endv]" in filter_text
+
+
+def test_build_add_endcard_command_supports_source_audio_only(tmp_path: Path) -> None:
+    source = tmp_path / "source.mp4"
+    source.write_bytes(b"video")
+    endcard = tmp_path / "endcard.mov"
+    endcard.write_bytes(b"video")
+    backend = FakeVideoBackend(
+        probe_payloads={
+            source: {
+                "format": {"duration": "6.0"},
+                "streams": [
+                    {"codec_type": "video", "width": 1280, "height": 720},
+                    {"codec_type": "audio"},
+                ],
+            },
+            endcard: {
+                "format": {"duration": "2.0"},
+                "streams": [{"codec_type": "video", "width": 1280, "height": 720}],
+            },
+        }
+    )
+    processor = VideoProcessor(backend=backend)
+    config = VideoBatchConfig(
+        input_files=[source],
+        operation_type=VideoOperationType.ADD_ENDCARD,
+        endcard=VideoEndCardSettings(endcard_file=endcard, overlap_seconds=1.0, audio_crossfade_seconds=0.4),
+    )
+
+    arguments = processor.build_ffmpeg_arguments(source, tmp_path / "output.mp4", config)
+    filter_text = arguments[arguments.index("-filter_complex") + 1]
+
+    assert "[0:a]asetpts=PTS-STARTPTS[outa]" in filter_text
+    assert "adelay=" not in filter_text
+    assert "[outa]" in arguments
+
+
+def test_build_add_endcard_command_supports_endcard_audio_only(tmp_path: Path) -> None:
+    source = tmp_path / "source.mp4"
+    source.write_bytes(b"video")
+    endcard = tmp_path / "endcard.mov"
+    endcard.write_bytes(b"video")
+    backend = FakeVideoBackend(
+        probe_payloads={
+            source: {
+                "format": {"duration": "6.0"},
+                "streams": [{"codec_type": "video", "width": 1280, "height": 720}],
+            },
+            endcard: {
+                "format": {"duration": "2.0"},
+                "streams": [
+                    {"codec_type": "video", "width": 1280, "height": 720},
+                    {"codec_type": "audio"},
+                ],
+            },
+        }
+    )
+    processor = VideoProcessor(backend=backend)
+    config = VideoBatchConfig(
+        input_files=[source],
+        operation_type=VideoOperationType.ADD_ENDCARD,
+        endcard=VideoEndCardSettings(endcard_file=endcard, overlap_seconds=1.0, audio_crossfade_seconds=0.4),
+    )
+
+    arguments = processor.build_ffmpeg_arguments(source, tmp_path / "output.mp4", config)
+    filter_text = arguments[arguments.index("-filter_complex") + 1]
+
+    assert "[1:a]adelay=5000:all=1,afade=t=in:st=5.000:d=0.400[outa]" in filter_text
+    assert "[outa]" in arguments
+
+
+def test_build_add_endcard_command_supports_silent_output(tmp_path: Path) -> None:
+    source = tmp_path / "source.mp4"
+    source.write_bytes(b"video")
+    endcard = tmp_path / "endcard.mov"
+    endcard.write_bytes(b"video")
+    backend = FakeVideoBackend(
+        probe_payloads={
+            source: {
+                "format": {"duration": "6.0"},
+                "streams": [{"codec_type": "video", "width": 1280, "height": 720}],
+            },
+            endcard: {
+                "format": {"duration": "2.0"},
+                "streams": [{"codec_type": "video", "width": 1280, "height": 720}],
+            },
+        }
+    )
+    processor = VideoProcessor(backend=backend)
+    config = VideoBatchConfig(
+        input_files=[source],
+        operation_type=VideoOperationType.ADD_ENDCARD,
+        endcard=VideoEndCardSettings(endcard_file=endcard, overlap_seconds=1.0, audio_crossfade_seconds=0.4),
+    )
+
+    arguments = processor.build_ffmpeg_arguments(source, tmp_path / "output.mp4", config)
+    filter_text = arguments[arguments.index("-filter_complex") + 1]
+
+    assert "[outa]" not in filter_text
+    assert arguments.count("-map") == 1
+    assert "-c:a" not in arguments
 
 
 def test_extract_preview_frame_uses_backend_cache(tmp_path: Path, monkeypatch) -> None:

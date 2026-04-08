@@ -1,8 +1,9 @@
 ﻿from __future__ import annotations
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import QEasingCurve, QPropertyAnimation, Qt
 from PySide6.QtWidgets import (
     QFrame,
+    QGraphicsOpacityEffect,
     QHBoxLayout,
     QLabel,
     QListWidget,
@@ -16,6 +17,7 @@ from PySide6.QtWidgets import (
 
 from logo_toolkit.app_info import APP_DISPLAY_NAME
 from logo_toolkit.tools.registry import build_tool_registry
+from logo_toolkit.ui.theme import apply_shadow, main_window_stylesheet
 
 
 class MainWindow(QMainWindow):
@@ -25,6 +27,7 @@ class MainWindow(QMainWindow):
         self.resize(1320, 820)
         self._tool_widgets: dict[str, QWidget] = {}
         self._tool_descriptions: dict[str, str] = {}
+        self._tool_fade_animation: QPropertyAnimation | None = None
         self._build_ui()
 
     def _build_ui(self) -> None:
@@ -71,6 +74,7 @@ class MainWindow(QMainWindow):
         helper_copy.setWordWrap(True)
         helper_layout.addWidget(helper_title)
         helper_layout.addWidget(helper_copy)
+        apply_shadow(helper_card, blur_radius=22, y_offset=8, alpha=18)
 
         sidebar_layout.addWidget(section_label)
         sidebar_layout.addWidget(section_copy)
@@ -102,6 +106,8 @@ class MainWindow(QMainWindow):
         body_layout.addWidget(sidebar)
         body_layout.addWidget(content_frame, stretch=1)
         root_layout.addLayout(body_layout)
+        apply_shadow(sidebar, blur_radius=36, y_offset=14, alpha=20)
+        apply_shadow(content_frame, blur_radius=44, y_offset=16, alpha=18)
 
         self.setCentralWidget(root)
         self.tool_list.setCurrentRow(0)
@@ -112,78 +118,24 @@ class MainWindow(QMainWindow):
             self.stack.setCurrentIndex(row)
             tool_id = self.tool_list.item(row).data(Qt.ItemDataRole.UserRole)
             self.tool_description.setText(self._tool_descriptions.get(str(tool_id), ""))
+            self._fade_in_widget(self.stack.currentWidget())
 
     def _apply_styles(self) -> None:
-        self.setStyleSheet(
-            """
-            QMainWindow {
-                background: #f3efe6;
-            }
-            #sidebarFrame {
-                background: #1f312d;
-                border-radius: 24px;
-                border: 1px solid #314843;
-            }
-            #sidebarTitleLabel {
-                color: #f8efe0;
-                font-size: 16px;
-                font-weight: 700;
-            }
-            #sidebarCopyLabel {
-                color: #b8c7c1;
-                font-size: 12px;
-            }
-            #toolList {
-                background: rgba(255, 255, 255, 0.04);
-                border: 1px solid rgba(240, 231, 218, 0.08);
-                border-radius: 18px;
-                padding: 10px;
-                color: #f7f0e4;
-                outline: none;
-            }
-            #toolList::item {
-                background: transparent;
-                padding: 12px 12px;
-                border-radius: 12px;
-                margin: 2px 0;
-                border: 1px solid transparent;
-            }
-            #toolList::item:hover {
-                background: rgba(255, 255, 255, 0.06);
-            }
-            #toolList::item:selected {
-                background: #f3ead8;
-                color: #22312d;
-                border: 1px solid #dbc8a3;
-                font-weight: 700;
-            }
-            #toolDescriptionLabel {
-                color: #c7d6cf;
-                font-size: 12px;
-                line-height: 1.4em;
-                padding: 2px 2px 0 2px;
-            }
-            #helperCard {
-                background: #f0e3c8;
-                border-radius: 18px;
-                border: 1px solid #dbc8a5;
-            }
-            #helperTitleLabel {
-                color: #3d3429;
-                font-size: 13px;
-                font-weight: 700;
-            }
-            #helperCopyLabel {
-                color: #5c5041;
-                font-size: 12px;
-            }
-            #contentFrame {
-                background: #fbf8f1;
-                border-radius: 26px;
-                border: 1px solid #deceb3;
-            }
-            #toolStack {
-                background: transparent;
-            }
-            """
-        )
+        self.setStyleSheet(main_window_stylesheet())
+
+    def _fade_in_widget(self, widget: QWidget | None) -> None:
+        if widget is None:
+            return
+        if self._tool_fade_animation is not None:
+            self._tool_fade_animation.stop()
+        effect = QGraphicsOpacityEffect(widget)
+        effect.setOpacity(0.0)
+        widget.setGraphicsEffect(effect)
+        animation = QPropertyAnimation(effect, b"opacity", self)
+        animation.setDuration(180)
+        animation.setStartValue(0.0)
+        animation.setEndValue(1.0)
+        animation.setEasingCurve(QEasingCurve.Type.OutCubic)
+        animation.finished.connect(lambda: widget.setGraphicsEffect(None))
+        self._tool_fade_animation = animation
+        animation.start()
