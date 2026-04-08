@@ -44,6 +44,7 @@ from logo_toolkit.core.models import (
     TransformFormat,
 )
 from logo_toolkit.tools.logo_tool import ImageTableWidget, ImportGroupBox
+from logo_toolkit.ui.theme import toolkit_tool_stylesheet
 
 
 class BatchTransformToolWidget(QWidget):
@@ -413,6 +414,7 @@ class BatchTransformToolWidget(QWidget):
             }
             """
         )
+        self.setStyleSheet(toolkit_tool_stylesheet())
 
     def _create_spinbox(self, value: int, minimum: int, maximum: int, suffix: str) -> QSpinBox:
         spinbox = QSpinBox()

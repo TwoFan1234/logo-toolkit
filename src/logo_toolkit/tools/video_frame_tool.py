@@ -39,6 +39,7 @@ from logo_toolkit.core.video_frame_processor import (
     VideoFrameJobConfig,
     VideoFrameProcessor,
 )
+from logo_toolkit.ui.theme import toolkit_tool_stylesheet
 
 
 class DropTableWidget(QTableWidget):
@@ -550,3 +551,4 @@ class BatchVideoFrameToolWidget(QWidget):
             }
             """
         )
+        self.setStyleSheet(toolkit_tool_stylesheet())

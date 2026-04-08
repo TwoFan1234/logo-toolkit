@@ -45,6 +45,7 @@ from logo_toolkit.core.models import (
     TemplatePreset,
 )
 from logo_toolkit.core.preset_store import TemplatePresetStore
+from logo_toolkit.ui.theme import toolkit_tool_stylesheet
 from logo_toolkit.ui.video_logo_preview_canvas import VideoLogoPreviewCanvas
 
 
@@ -462,6 +463,7 @@ class BatchLogoToolWidget(QWidget):
             }
             """
         )
+        self.setStyleSheet(toolkit_tool_stylesheet())
 
     def _load_presets(self) -> None:
         self.presets = self.preset_store.load_presets()

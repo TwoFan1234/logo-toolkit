@@ -72,6 +72,7 @@ class VideoOperationType(str, Enum):
     RESIZE = "resize"
     EXTRACT_AUDIO = "extract_audio"
     ADD_LOGO = "add_logo"
+    ADD_ENDCARD = "add_endcard"
 
 
 class VideoCompressionPreset(str, Enum):
@@ -92,6 +93,11 @@ class AudioExportFormat(str, Enum):
     MP3 = "mp3"
     WAV = "wav"
     AAC = "aac"
+
+
+class VideoEndCardAlphaMode(str, Enum):
+    PREMIERE_COMPAT = "premiere_compat"
+    DIRECT = "direct"
 
 
 @dataclass(slots=True)
@@ -399,6 +405,14 @@ class VideoLogoSettings:
 
 
 @dataclass(slots=True)
+class VideoEndCardSettings:
+    endcard_file: Path | None = None
+    overlap_seconds: float = 1.5
+    audio_crossfade_seconds: float = 0.5
+    alpha_mode: VideoEndCardAlphaMode = VideoEndCardAlphaMode.PREMIERE_COMPAT
+
+
+@dataclass(slots=True)
 class VideoItem:
     source_path: Path
     import_root: Path | None = None
@@ -490,6 +504,7 @@ class VideoBatchConfig:
     resize: VideoResizeSettings = field(default_factory=VideoResizeSettings)
     audio_extract: AudioExtractSettings = field(default_factory=AudioExtractSettings)
     logo_overlay: VideoLogoSettings = field(default_factory=VideoLogoSettings)
+    endcard: VideoEndCardSettings = field(default_factory=VideoEndCardSettings)
 
 
 @dataclass(slots=True)
