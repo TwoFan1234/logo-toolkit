@@ -37,12 +37,13 @@ class VideoProcessor:
     def get_video_metadata(self, source_path: Path) -> VideoItem:
         self.validate_video(source_path)
         payload = self.backend.probe(source_path)
-        duration, width, height = self.parse_probe_metadata(payload)
+        duration, width, height, frame_rate = self.parse_probe_metadata(payload)
         return VideoItem(
             source_path=source_path,
             duration_seconds=duration,
             width=width,
             height=height,
+            frame_rate=frame_rate,
         )
 
     def extract_preview_frame(self, source_path: Path, timestamp_seconds: float = 0.0) -> Path:
@@ -62,7 +63,7 @@ class VideoProcessor:
             raise ValueError(f"不支持的视频格式: {source_path.suffix}")
 
     @staticmethod
-    def parse_probe_metadata(payload: dict[str, Any]) -> tuple[float | None, int | None, int | None]:
+    def parse_probe_metadata(payload: dict[str, Any]) -> tuple[float | None, int | None, int | None, str | None]:
         streams = payload.get("streams", [])
         if not isinstance(streams, list):
             streams = []
@@ -83,7 +84,13 @@ class VideoProcessor:
         duration = VideoProcessor._float_or_none(format_payload.get("duration"))
         if duration is None and isinstance(video_stream, dict):
             duration = VideoProcessor._float_or_none(video_stream.get("duration"))
-        return duration, width, height
+        frame_rate = None
+        if isinstance(video_stream, dict):
+            frame_rate = (
+                VideoProcessor._frame_rate_or_none(video_stream.get("avg_frame_rate"))
+                or VideoProcessor._frame_rate_or_none(video_stream.get("r_frame_rate"))
+            )
+        return duration, width, height, frame_rate
 
     def process_batch(
         self,
@@ -240,7 +247,7 @@ class VideoProcessor:
         config: VideoBatchConfig,
     ) -> Path:
         target_suffix = self._target_extension(source_path, operation_type, config)
-        file_name = f"{source_path.stem}{output_suffix}{target_suffix}"
+        file_name = f"{source_path.stem}{target_suffix}"
         if not preserve_structure or source_root is None:
             return Path(file_name)
         try:
@@ -414,5 +421,28 @@ class VideoProcessor:
             return float(value)
         except (TypeError, ValueError):
             return None
+
+    @staticmethod
+    def _frame_rate_or_none(value: Any) -> str | None:
+        text = str(value or "").strip()
+        if not text or text == "0/0":
+            return None
+        if "/" in text:
+            numerator_text, denominator_text = text.split("/", 1)
+            try:
+                numerator = int(numerator_text)
+                denominator = int(denominator_text)
+            except ValueError:
+                return None
+            if numerator <= 0 or denominator <= 0:
+                return None
+            return f"{numerator}/{denominator}"
+        try:
+            frame_rate = float(text)
+        except ValueError:
+            return None
+        if frame_rate <= 0:
+            return None
+        return f"{frame_rate:g}"
 
 

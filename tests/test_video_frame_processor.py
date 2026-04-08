@@ -62,6 +62,43 @@ def test_build_frame_command_scales_landscape_video_by_width(tmp_path: Path) -> 
     )
 
 
+def test_build_frame_command_uses_source_frame_rate_for_frame_input(tmp_path: Path) -> None:
+    video = tmp_path / "video.mp4"
+    video.write_bytes(b"video")
+    frame = tmp_path / "square.png"
+    create_frame(frame, (1080, 1080))
+    backend = FakeVideoBackend(
+        probe_payloads={
+            video: {
+                "format": {"duration": "1.0"},
+                "streams": [
+                    {
+                        "codec_type": "video",
+                        "width": 1920,
+                        "height": 1080,
+                        "avg_frame_rate": "30000/1001",
+                    }
+                ],
+            }
+        }
+    )
+    processor = VideoFrameProcessor(backend=backend)
+    config = VideoFrameJobConfig(input_files=[video], frame_files=[frame])
+    output = tmp_path / "out.mp4"
+
+    arguments = processor.build_ffmpeg_arguments(video, frame, output, config)
+
+    frame_index = arguments.index(str(frame))
+    assert arguments[frame_index - 5 : frame_index + 1] == [
+        "-loop",
+        "1",
+        "-framerate",
+        "30000/1001",
+        "-i",
+        str(frame),
+    ]
+
+
 def test_build_frame_command_supports_auto_standard_output_size(tmp_path: Path) -> None:
     video = tmp_path / "video.mp4"
     video.write_bytes(b"video")
@@ -144,5 +181,5 @@ def test_process_batch_outputs_each_video_frame_pair(tmp_path: Path) -> None:
 
     assert summary.total == 2
     assert summary.succeeded == 2
-    assert (output_dir / "video_square.mp4").exists()
-    assert (output_dir / "video_wide.mp4").exists()
+    assert (output_dir / "square" / "video.mp4").exists()
+    assert (output_dir / "wide" / "video.mp4").exists()

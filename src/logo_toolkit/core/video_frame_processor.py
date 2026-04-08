@@ -151,12 +151,15 @@ class VideoFrameProcessor:
             f"[0:v]scale={video_width}:{video_height}[fg];"
             f"[bg][fg]overlay={overlay_x}:{overlay_y}:shortest=1[outv]"
         )
+        frame_input_args = ["-loop", "1"]
+        if video_item.frame_rate:
+            frame_input_args.extend(["-framerate", video_item.frame_rate])
+
         arguments = [
             "-y",
             "-i",
             str(video_path),
-            "-loop",
-            "1",
+            *frame_input_args,
             "-i",
             str(frame_path),
             "-filter_complex",
@@ -202,14 +205,15 @@ class VideoFrameProcessor:
     ) -> Path:
         if output_directory is None:
             raise ValueError("必须提供输出目录")
-        file_name = f"{video_path.stem}_{frame_path.stem}{video_path.suffix.lower()}"
+        file_name = video_path.name
+        frame_folder = frame_path.stem
         if source_root is None:
-            return self._ensure_unique_output_path(output_directory / file_name)
+            return self._ensure_unique_output_path(output_directory / frame_folder / file_name)
         try:
             relative_parent = video_path.relative_to(source_root).parent
         except ValueError:
             relative_parent = Path()
-        return self._ensure_unique_output_path(output_directory / source_root.name / relative_parent / file_name)
+        return self._ensure_unique_output_path(output_directory / frame_folder / source_root.name / relative_parent / file_name)
 
     @staticmethod
     def output_size_for_frame(

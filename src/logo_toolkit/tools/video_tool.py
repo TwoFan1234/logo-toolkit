@@ -791,11 +791,11 @@ class BatchVideoToolWidget(QWidget):
     def current_config(self) -> VideoBatchConfig:
         operation_type = self.current_operation_type()
         suffix_map = {
-            VideoOperationType.COMPRESS: "_compressed",
-            VideoOperationType.CONVERT: "_converted",
-            VideoOperationType.TRIM: "_trimmed",
-            VideoOperationType.RESIZE: "_resized",
-            VideoOperationType.EXTRACT_AUDIO: "_audio",
+            VideoOperationType.COMPRESS: "",
+            VideoOperationType.CONVERT: "",
+            VideoOperationType.TRIM: "",
+            VideoOperationType.RESIZE: "",
+            VideoOperationType.EXTRACT_AUDIO: "",
             VideoOperationType.ADD_LOGO: "",
         }
         trim_settings = VideoTrimSettings(

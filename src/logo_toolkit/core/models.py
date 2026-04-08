@@ -405,6 +405,7 @@ class VideoItem:
     duration_seconds: float | None = None
     width: int | None = None
     height: int | None = None
+    frame_rate: str | None = None
     status: str = "待处理"
     message: str = ""
     output_path: Path | None = None

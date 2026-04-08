@@ -54,11 +54,14 @@ def test_parse_probe_metadata_maps_duration_and_resolution() -> None:
         ],
     }
 
-    duration, width, height = VideoProcessor.parse_probe_metadata(payload)
+    payload["streams"][1]["avg_frame_rate"] = "30000/1001"
+
+    duration, width, height, frame_rate = VideoProcessor.parse_probe_metadata(payload)
 
     assert duration == 12.345
     assert width == 1920
     assert height == 1080
+    assert frame_rate == "30000/1001"
 
 
 def test_collect_videos_recurses_and_filters_supported_extensions(tmp_path: Path) -> None:
@@ -82,7 +85,7 @@ def test_build_convert_command_uses_target_extension_and_codecs(tmp_path: Path) 
         operation_type=VideoOperationType.CONVERT,
         conversion=VideoConversionSettings(target_format=VideoContainerFormat.WEBM),
     )
-    output = tmp_path / "sample_converted.webm"
+    output = tmp_path / "sample.webm"
 
     arguments = processor.build_ffmpeg_arguments(source, output, config)
 
@@ -98,7 +101,7 @@ def test_build_extract_audio_output_uses_audio_extension(tmp_path: Path) -> None
     config = VideoBatchConfig(
         input_files=[source],
         operation_type=VideoOperationType.EXTRACT_AUDIO,
-        output_suffix="_audio",
+        output_suffix="",
         audio_extract=AudioExtractSettings(target_format=AudioExportFormat.MP3),
     )
 
@@ -112,7 +115,7 @@ def test_build_extract_audio_output_uses_audio_extension(tmp_path: Path) -> None
         config=config,
     )
 
-    assert output_path.name == "sample_audio.mp3"
+    assert output_path.name == "sample.mp3"
 
 
 def test_trim_validation_rejects_invalid_ranges() -> None:
@@ -349,13 +352,13 @@ def test_process_batch_reports_failures_without_stopping(tmp_path: Path) -> None
     first.write_bytes(b"1")
     second.write_bytes(b"2")
     output_dir = tmp_path / "exports"
-    backend = FakeVideoBackend(failing_outputs={"bad_converted.mp4"})
+    backend = FakeVideoBackend(failing_outputs={"bad.mp4"})
     processor = VideoProcessor(backend=backend)
     config = VideoBatchConfig(
         input_files=[first, second],
         operation_type=VideoOperationType.CONVERT,
         output_directory=output_dir,
-        output_suffix="_converted",
+        output_suffix="",
         source_roots={first: source_root, second: source_root},
     )
 
@@ -364,4 +367,4 @@ def test_process_batch_reports_failures_without_stopping(tmp_path: Path) -> None
     assert summary.total == 2
     assert summary.succeeded == 1
     assert summary.failed == 1
-    assert (output_dir / "videos" / "ok_converted.mp4").exists()
+    assert (output_dir / "videos" / "ok.mp4").exists()
