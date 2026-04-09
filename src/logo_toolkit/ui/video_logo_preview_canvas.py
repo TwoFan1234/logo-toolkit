@@ -50,13 +50,13 @@ class VideoLogoPreviewCanvas(QWidget):
         card_rect = QRectF(self.rect()).adjusted(5, 5, -5, -5)
         card_path = QPainterPath()
         card_path.addRoundedRect(card_rect, 18, 18)
-        painter.fillPath(card_path, QColor("#fcf8f0"))
-        painter.setPen(QPen(QColor("#dfd1b8"), 1.2))
+        painter.fillPath(card_path, QColor("#ffffff"))
+        painter.setPen(QPen(QColor("#e5e5ea"), 1.2))
         painter.drawPath(card_path)
 
         if self._base_pixmap.isNull():
             empty_rect = card_rect.adjusted(26, 26, -26, -26)
-            painter.setPen(QColor("#6d6252"))
+            painter.setPen(QColor("#6e6e73"))
             painter.drawText(
                 empty_rect,
                 Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignVCenter,
@@ -66,25 +66,25 @@ class VideoLogoPreviewCanvas(QWidget):
 
         self._image_rect = self._fit_rect(self._base_pixmap.width(), self._base_pixmap.height())
         image_frame = self._image_rect.adjusted(-6, -6, 6, 6)
-        painter.setBrush(QColor("#ffffff"))
-        painter.setPen(QPen(QColor("#d6c8b0"), 1.2))
+        painter.setBrush(QColor("#f8f8fa"))
+        painter.setPen(QPen(QColor("#e5e5ea"), 1.2))
         painter.drawRoundedRect(image_frame, 14, 14)
         painter.drawPixmap(self._image_rect.toRect(), self._base_pixmap)
 
         logo_rect = self._logo_rect()
         if not self._logo_pixmap.isNull():
             painter.drawPixmap(logo_rect.toRect(), self._logo_pixmap)
-            painter.setBrush(QColor(199, 96, 53, 38))
+            painter.setBrush(QColor(0, 113, 227, 28))
             painter.setPen(QPen(Qt.PenStyle.NoPen))
             painter.drawRoundedRect(logo_rect, 10, 10)
-            pen = QPen(QColor("#c76035"), 2, Qt.PenStyle.DashLine)
+            pen = QPen(QColor("#0071e3"), 2, Qt.PenStyle.DashLine)
             painter.setPen(pen)
             painter.drawRoundedRect(logo_rect, 10, 10)
-            painter.setBrush(QColor("#c76035"))
-            painter.setPen(QPen(QColor("#fffaf1"), 2))
+            painter.setBrush(QColor("#0071e3"))
+            painter.setPen(QPen(QColor("#ffffff"), 2))
             painter.drawEllipse(self._handle_rect())
         else:
-            painter.setPen(QColor("#6f6554"))
+            painter.setPen(QColor("#86868b"))
             painter.drawText(
                 card_rect.adjusted(0, 0, 0, -16),
                 Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignBottom,
@@ -210,7 +210,7 @@ class VideoLogoPreviewCanvas(QWidget):
         if self._base_pixmap.isNull():
             return None
         image = QImage(self.size(), QImage.Format.Format_ARGB32_Premultiplied)
-        image.fill(QColor("#fff9ef"))
+        image.fill(QColor("#f5f5f7"))
         painter = QPainter(image)
         self.render(painter)
         painter.end()

@@ -55,6 +55,7 @@ from logo_toolkit.core.models import (
     VideoTrimSettings,
 )
 from logo_toolkit.core.video_processor import VideoProcessor
+from logo_toolkit.ui.theme import toolkit_tool_stylesheet
 from logo_toolkit.ui.video_logo_preview_canvas import VideoLogoPreviewCanvas
 
 
@@ -654,6 +655,7 @@ class BatchVideoToolWidget(QWidget):
             }
             """
         )
+        self.setStyleSheet(toolkit_tool_stylesheet())
 
     def _create_ratio_spinbox(self, value: float, minimum: float = 0.0) -> QDoubleSpinBox:
         spinbox = QDoubleSpinBox()
