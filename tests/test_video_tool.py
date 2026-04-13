@@ -7,6 +7,7 @@ from PySide6.QtWidgets import QApplication
 from PIL import Image
 
 from logo_toolkit.core.models import PixelLogoPlacement, VideoOperationType
+from logo_toolkit.core.models import VideoItem
 from logo_toolkit.tools.registry import build_tool_registry
 from logo_toolkit.tools.video_tool import BatchVideoToolWidget
 from logo_toolkit.ui.video_logo_preview_canvas import VideoLogoPreviewCanvas
@@ -92,5 +93,41 @@ def test_video_logo_preview_canvas_round_trips_source_pixels(tmp_path: Path) -> 
 
     assert emitted[-1] == (24, 32, 280, "bottom_right")
     canvas.close()
+
+
+def test_video_widget_current_config_only_uses_checked_items(tmp_path: Path) -> None:
+    get_app()
+    widget = BatchVideoToolWidget()
+    first = VideoItem(source_path=tmp_path / "wide.mp4", width=1920, height=1080)
+    second = VideoItem(source_path=tmp_path / "square.mp4", width=1080, height=1080, selected_for_batch=False)
+    widget.items = [first, second]
+    widget._rebuild_table()
+
+    config = widget.current_config(only_checked=True)
+
+    assert config.input_files == [first.source_path]
+    assert config.source_roots == {first.source_path: None}
+    widget.close()
+
+
+def test_video_widget_ratio_filter_and_remove_selected_rows(tmp_path: Path) -> None:
+    get_app()
+    widget = BatchVideoToolWidget()
+    wide = VideoItem(source_path=tmp_path / "wide.mp4", width=1920, height=1080)
+    square = VideoItem(source_path=tmp_path / "square.mp4", width=1080, height=1080)
+    portrait = VideoItem(source_path=tmp_path / "portrait.mp4", width=1080, height=1920)
+    widget.items = [wide, square, portrait]
+    widget._rebuild_table()
+
+    widget.ratio_filter_combo.setCurrentIndex(widget.ratio_filter_combo.findData("9:16"))
+    widget._apply_ratio_filter_selection()
+
+    assert [item.source_path for item in widget._checked_items()] == [portrait.source_path]
+
+    widget.video_table.selectRow(1)
+    widget._remove_selected_rows()
+
+    assert [item.source_path for item in widget.items] == [wide.source_path, portrait.source_path]
+    widget.close()
 
 

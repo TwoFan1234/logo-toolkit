@@ -24,7 +24,7 @@ class MainWindow(QMainWindow):
     def __init__(self) -> None:
         super().__init__()
         self.setWindowTitle(APP_DISPLAY_NAME)
-        self.resize(1320, 820)
+        self.resize(1720, 860)
         self._tool_widgets: dict[str, QWidget] = {}
         self._tool_descriptions: dict[str, str] = {}
         self._tool_fade_animation: QPropertyAnimation | None = None
@@ -33,18 +33,20 @@ class MainWindow(QMainWindow):
     def _build_ui(self) -> None:
         root = QWidget()
         root_layout = QVBoxLayout(root)
-        root_layout.setContentsMargins(14, 14, 14, 14)
+        root_layout.setContentsMargins(18, 18, 18, 18)
         root_layout.setSpacing(0)
 
         body_layout = QHBoxLayout()
-        body_layout.setSpacing(14)
+        body_layout.setSpacing(18)
 
         sidebar = QFrame()
         sidebar.setObjectName("sidebarFrame")
-        sidebar.setFixedWidth(272)
+        sidebar.setMinimumWidth(244)
+        sidebar.setMaximumWidth(320)
+        sidebar.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Expanding)
         sidebar_layout = QVBoxLayout(sidebar)
-        sidebar_layout.setContentsMargins(18, 18, 18, 18)
-        sidebar_layout.setSpacing(12)
+        sidebar_layout.setContentsMargins(20, 20, 20, 20)
+        sidebar_layout.setSpacing(14)
 
         section_label = QLabel("工具导航")
         section_label.setObjectName("sidebarTitleLabel")
@@ -85,7 +87,7 @@ class MainWindow(QMainWindow):
         content_frame = QFrame()
         content_frame.setObjectName("contentFrame")
         content_layout = QVBoxLayout(content_frame)
-        content_layout.setContentsMargins(14, 14, 14, 14)
+        content_layout.setContentsMargins(18, 18, 18, 18)
         content_layout.setSpacing(0)
 
         self.stack = QStackedWidget()

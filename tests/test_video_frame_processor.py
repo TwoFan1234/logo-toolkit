@@ -57,8 +57,8 @@ def test_build_frame_command_scales_landscape_video_by_width(tmp_path: Path) -> 
     filter_text = arguments[arguments.index("-filter_complex") + 1]
     assert filter_text == (
         "[1:v]scale=1080:1080[bg];"
-        "[0:v]scale=1080:608[fg];"
-        "[bg][fg]overlay=0:236:shortest=1[outv]"
+        "[0:v]scale=1086:612[fg];"
+        "[bg][fg]overlay=-3:234:shortest=1[outv]"
     )
 
 
@@ -123,7 +123,7 @@ def test_build_frame_command_supports_auto_standard_output_size(tmp_path: Path) 
     arguments = processor.build_ffmpeg_arguments(video, frame, output, config)
 
     filter_text = arguments[arguments.index("-filter_complex") + 1]
-    assert filter_text.startswith("[1:v]scale=1080:1920[bg];[0:v]scale=1080:608[fg];")
+    assert filter_text.startswith("[1:v]scale=1080:1920[bg];[0:v]scale=1086:612[fg];")
 
 
 def test_build_frame_command_supports_custom_output_size(tmp_path: Path) -> None:
@@ -153,8 +153,8 @@ def test_build_frame_command_supports_custom_output_size(tmp_path: Path) -> None
     filter_text = arguments[arguments.index("-filter_complex") + 1]
     assert filter_text == (
         "[1:v]scale=1280:720[bg];"
-        "[0:v]scale=404:720[fg];"
-        "[bg][fg]overlay=438:0:shortest=1[outv]"
+        "[0:v]scale=408:724[fg];"
+        "[bg][fg]overlay=436:-2:shortest=1[outv]"
     )
 
 

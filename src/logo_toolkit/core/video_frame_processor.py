@@ -6,7 +6,13 @@ from typing import Callable
 
 from PIL import Image
 
-from logo_toolkit.core.models import BatchSummary, ExportResult, SUPPORTED_EXTENSIONS, VideoItem
+from logo_toolkit.core.models import (
+    BatchSummary,
+    ExportResult,
+    SUPPORTED_EXTENSIONS,
+    VideoItem,
+    common_aspect_ratio_label,
+)
 from logo_toolkit.core.video_backend import VideoBackend
 from logo_toolkit.core.video_processor import VideoProcessor
 
@@ -14,6 +20,7 @@ from logo_toolkit.core.video_processor import VideoProcessor
 OUTPUT_SIZE_FOLLOW_FRAME = "follow_frame"
 OUTPUT_SIZE_AUTO_STANDARD = "auto_standard"
 OUTPUT_SIZE_CUSTOM = "custom"
+DEFAULT_VIDEO_FRAME_SCALE_FACTOR = 1.005
 
 
 @dataclass(slots=True)
@@ -21,6 +28,7 @@ class FrameImageItem:
     source_path: Path
     width: int | None = None
     height: int | None = None
+    selected_for_batch: bool = True
     status: str = "待处理"
     message: str = ""
 
@@ -241,7 +249,14 @@ class VideoFrameProcessor:
         else:
             target_height = canvas_height
             target_width = int(round(source_width * target_height / max(source_height, 1)))
-        return VideoFrameProcessor._even_size(target_width, target_height)
+        return VideoFrameProcessor._scaled_video_size_with_zoom(target_width, target_height)
+
+    @staticmethod
+    def _scaled_video_size_with_zoom(width: int, height: int) -> tuple[int, int]:
+        return (
+            VideoFrameProcessor._even_dimension_up(width * DEFAULT_VIDEO_FRAME_SCALE_FACTOR),
+            VideoFrameProcessor._even_dimension_up(height * DEFAULT_VIDEO_FRAME_SCALE_FACTOR),
+        )
 
     @staticmethod
     def standard_size_for_ratio(width: int, height: int) -> tuple[int, int]:
@@ -258,13 +273,9 @@ class VideoFrameProcessor:
 
     @staticmethod
     def ratio_label(width: int, height: int) -> str:
-        ratio = width / max(height, 1)
-        if VideoFrameProcessor._close_ratio(ratio, 16 / 9):
-            return "16:9"
-        if VideoFrameProcessor._close_ratio(ratio, 1.0):
-            return "1:1"
-        if VideoFrameProcessor._close_ratio(ratio, 9 / 16):
-            return "9:16"
+        common_label = common_aspect_ratio_label(width, height)
+        if common_label != "其他":
+            return common_label
         return f"{width}:{height}"
 
     @staticmethod
@@ -279,6 +290,13 @@ class VideoFrameProcessor:
     def _even_dimension(value: int | float) -> int:
         integer = max(2, int(round(value)))
         return integer if integer % 2 == 0 else integer - 1
+
+    @staticmethod
+    def _even_dimension_up(value: int | float) -> int:
+        from math import ceil
+
+        integer = max(2, ceil(value))
+        return integer if integer % 2 == 0 else integer + 1
 
     @staticmethod
     def _ensure_unique_output_path(path: Path) -> Path:

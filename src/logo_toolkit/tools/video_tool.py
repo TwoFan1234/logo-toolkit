@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 import os
 from pathlib import Path
@@ -55,7 +55,8 @@ from logo_toolkit.core.models import (
     VideoTrimSettings,
 )
 from logo_toolkit.core.video_processor import VideoProcessor
-from logo_toolkit.ui.theme import toolkit_tool_stylesheet
+from logo_toolkit.ui.selection_helpers import build_check_item, populate_ratio_filter_combo, ratio_matches
+from logo_toolkit.ui.theme import configure_resizable_splitter, toolkit_tool_stylesheet
 from logo_toolkit.ui.video_logo_preview_canvas import VideoLogoPreviewCanvas
 
 
@@ -186,6 +187,7 @@ class BatchVideoToolWidget(QWidget):
         self.logo_pixel_placement = PixelLogoPlacement(margin_x_px=40, margin_y_px=40, width_px=220, anchor="bottom_right")
         self.logo_render_options = RenderOptions()
         self.available_operations = list(available_operations or self.DEFAULT_OPERATIONS)
+        self._table_syncing = False
         if not self.available_operations:
             raise ValueError("至少需要提供一个视频处理模式。")
         self.logo_only_mode = self.available_operations == [VideoOperationType.ADD_LOGO]
@@ -240,15 +242,21 @@ class BatchVideoToolWidget(QWidget):
         splitter.addWidget(operation_panel)
         splitter.addWidget(output_panel)
         if self.logo_only_mode:
-            splitter.setStretchFactor(0, 2)
-            splitter.setStretchFactor(1, 3)
-            splitter.setStretchFactor(2, 1)
-            splitter.setSizes([520, 760, 360])
+            configure_resizable_splitter(
+                splitter,
+                [import_panel, operation_panel, output_panel],
+                stretches=[2, 3, 2],
+                minimum_widths=[220, 260, 220],
+                initial_sizes=[520, 720, 280],
+            )
         else:
-            splitter.setStretchFactor(0, 2)
-            splitter.setStretchFactor(1, 1)
-            splitter.setStretchFactor(2, 1)
-            splitter.setSizes([700, 460, 360])
+            configure_resizable_splitter(
+                splitter,
+                [import_panel, operation_panel, output_panel],
+                stretches=[3, 2, 2],
+                minimum_widths=[240, 220, 220],
+                initial_sizes=[700, 380, 260],
+            )
 
         self._apply_styles()
         self._handle_operation_change(0)
@@ -261,6 +269,7 @@ class BatchVideoToolWidget(QWidget):
         layout = QVBoxLayout(group)
 
         buttons_layout = QHBoxLayout()
+        buttons_layout.setSpacing(8)
         add_files_button = QPushButton("添加视频")
         add_files_button.clicked.connect(self._choose_files)
         add_folder_button = QPushButton("导入文件夹")
@@ -271,23 +280,55 @@ class BatchVideoToolWidget(QWidget):
         buttons_layout.addWidget(add_folder_button)
         buttons_layout.addWidget(clear_button)
 
+        ratio_layout = QHBoxLayout()
+        ratio_layout.setSpacing(8)
+        ratio_label = QLabel("比例筛选")
+        ratio_label.setObjectName("filterLabel")
+        self.ratio_filter_combo = QComboBox()
+        populate_ratio_filter_combo(self.ratio_filter_combo)
+        self.apply_ratio_button = QPushButton("应用")
+        self.apply_ratio_button.setObjectName("compactButton")
+        self.apply_ratio_button.clicked.connect(self._apply_ratio_filter_selection)
+        ratio_layout.addWidget(ratio_label)
+        ratio_layout.addWidget(self.ratio_filter_combo, stretch=1)
+        ratio_layout.addWidget(self.apply_ratio_button)
+
+        action_layout = QHBoxLayout()
+        action_layout.setSpacing(8)
+        self.check_all_button = QPushButton("全选")
+        self.check_all_button.setObjectName("compactButton")
+        self.check_all_button.clicked.connect(lambda: self._set_all_items_checked(True))
+        self.clear_check_button = QPushButton("清空选择")
+        self.clear_check_button.setObjectName("compactButton")
+        self.clear_check_button.clicked.connect(lambda: self._set_all_items_checked(False))
+        self.remove_selected_button = QPushButton("移除选中")
+        self.remove_selected_button.setObjectName("compactButton")
+        self.remove_selected_button.clicked.connect(self._remove_selected_rows)
+        action_layout.addWidget(self.check_all_button)
+        action_layout.addWidget(self.clear_check_button)
+        action_layout.addStretch(1)
+        action_layout.addWidget(self.remove_selected_button)
+
         self.video_table = VideoTableWidget()
-        self.video_table.setColumnCount(6)
-        self.video_table.setHorizontalHeaderLabels(["文件名", "导入根目录", "时长", "分辨率", "状态", "说明"])
+        self.video_table.setColumnCount(8)
+        self.video_table.setHorizontalHeaderLabels(["执行", "文件名", "导入根目录", "时长", "分辨率", "比例", "状态", "说明"])
         self.video_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
-        self.video_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
-        self.video_table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
+        self.video_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
+        self.video_table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeMode.Stretch)
         self.video_table.horizontalHeader().setSectionResizeMode(3, QHeaderView.ResizeMode.ResizeToContents)
         self.video_table.horizontalHeader().setSectionResizeMode(4, QHeaderView.ResizeMode.ResizeToContents)
-        self.video_table.horizontalHeader().setSectionResizeMode(5, QHeaderView.ResizeMode.Stretch)
+        self.video_table.horizontalHeader().setSectionResizeMode(5, QHeaderView.ResizeMode.ResizeToContents)
+        self.video_table.horizontalHeader().setSectionResizeMode(6, QHeaderView.ResizeMode.ResizeToContents)
+        self.video_table.horizontalHeader().setSectionResizeMode(7, QHeaderView.ResizeMode.Stretch)
         self.video_table.verticalHeader().setVisible(False)
         self.video_table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
-        self.video_table.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
+        self.video_table.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
         self.video_table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         self.video_table.setAlternatingRowColors(True)
         self.video_table.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.video_table.customContextMenuRequested.connect(self._show_video_menu)
         self.video_table.itemSelectionChanged.connect(self._refresh_selected_metadata)
+        self.video_table.itemChanged.connect(self._handle_table_item_changed)
         self.video_table.paths_dropped.connect(self._load_videos)
         self.video_table.setMinimumHeight(420)
         self.video_table.setObjectName("videoTable")
@@ -297,6 +338,8 @@ class BatchVideoToolWidget(QWidget):
         hint.setObjectName("supportingLabel")
 
         layout.addLayout(buttons_layout)
+        layout.addLayout(ratio_layout)
+        layout.addLayout(action_layout)
         layout.addWidget(hint)
         layout.addWidget(self.video_table, stretch=1)
         return group
@@ -501,7 +544,7 @@ class BatchVideoToolWidget(QWidget):
         self.output_dir_button = QPushButton("选择导出目录")
         self.output_dir_button.clicked.connect(self._choose_output_dir)
         self.preserve_structure_checkbox = QCheckBox("导出时保持原文件夹结构")
-        self.preserve_structure_checkbox.setChecked(True)
+        self.preserve_structure_checkbox.setChecked(False)
         self.output_note_label = QLabel(
             "如未设置导出目录，会自动生成 video_output 文件夹。"
         )
@@ -740,29 +783,72 @@ class BatchVideoToolWidget(QWidget):
 
         self.items.extend(new_items)
         self._rebuild_table()
-        self.summary_label.setText(f"已载入 {len(self.items)} 个视频")
+        self.summary_label.setText(f"已载入 {len(self.items)} 个视频，当前勾选 {len(self._checked_items())} 个")
         if self.video_table.rowCount() > 0 and self.video_table.currentRow() < 0:
             self.video_table.selectRow(0)
         self._refresh_selected_metadata()
 
     def _rebuild_table(self) -> None:
+        self._table_syncing = True
         self.video_table.setRowCount(len(self.items))
         for row, item in enumerate(self.items):
+            self.video_table.setItem(row, 0, build_check_item(item.selected_for_batch))
             name_item = QTableWidgetItem(item.display_name)
             name_item.setToolTip(str(item.source_path))
-            self.video_table.setItem(row, 0, name_item)
+            self.video_table.setItem(row, 1, name_item)
 
             root_text = str(item.import_root or item.source_path.parent)
             root_item = QTableWidgetItem(root_text)
             root_item.setToolTip(root_text)
-            self.video_table.setItem(row, 1, root_item)
-            self.video_table.setItem(row, 2, QTableWidgetItem(item.duration_text))
-            self.video_table.setItem(row, 3, QTableWidgetItem(item.resolution_text))
-            self.video_table.setItem(row, 4, QTableWidgetItem(item.status))
+            self.video_table.setItem(row, 2, root_item)
+            self.video_table.setItem(row, 3, QTableWidgetItem(item.duration_text))
+            self.video_table.setItem(row, 4, QTableWidgetItem(item.resolution_text))
+            self.video_table.setItem(row, 5, QTableWidgetItem(item.ratio_text))
+            self.video_table.setItem(row, 6, QTableWidgetItem(item.status))
 
             message_item = QTableWidgetItem(item.message)
             message_item.setToolTip(item.message)
-            self.video_table.setItem(row, 5, message_item)
+            self.video_table.setItem(row, 7, message_item)
+        self._table_syncing = False
+
+    def _handle_table_item_changed(self, table_item: QTableWidgetItem) -> None:
+        if self._table_syncing or table_item.column() != 0:
+            return
+        row = table_item.row()
+        if 0 <= row < len(self.items):
+            self.items[row].selected_for_batch = table_item.checkState() == Qt.CheckState.Checked
+
+    def _checked_items(self) -> list[VideoItem]:
+        return [item for item in self.items if item.selected_for_batch]
+
+    def _set_all_items_checked(self, checked: bool) -> None:
+        for item in self.items:
+            item.selected_for_batch = checked
+        self._rebuild_table()
+        self.summary_label.setText(f"已勾选 {len(self._checked_items())}/{len(self.items)} 个视频")
+
+    def _apply_ratio_filter_selection(self) -> None:
+        ratio_filter = str(self.ratio_filter_combo.currentData() or "all")
+        for item in self.items:
+            item.selected_for_batch = ratio_matches(item.width, item.height, ratio_filter)
+        self._rebuild_table()
+        self.summary_label.setText(f"已按 {self.ratio_filter_combo.currentText()} 勾选 {len(self._checked_items())} 个视频")
+
+    def _remove_selected_rows(self) -> None:
+        rows = sorted({index.row() for index in self.video_table.selectionModel().selectedRows()}, reverse=True)
+        if not rows:
+            QMessageBox.information(self, "未选择素材", "请先在列表里选中要移除的视频。")
+            return
+        for row in rows:
+            if 0 <= row < len(self.items):
+                self.items.pop(row)
+        self._rebuild_table()
+        if self.items:
+            self.video_table.selectRow(min(rows[-1], len(self.items) - 1))
+            self.summary_label.setText(f"已移除 {len(rows)} 个视频，剩余 {len(self.items)} 个")
+        else:
+            self.summary_label.setText("视频列表已清空")
+        self._refresh_selected_metadata()
 
     def _refresh_selected_metadata(self) -> None:
         item = self._selected_item()
@@ -790,8 +876,9 @@ class BatchVideoToolWidget(QWidget):
             return current
         return VideoOperationType(str(current or VideoOperationType.COMPRESS.value))
 
-    def current_config(self) -> VideoBatchConfig:
+    def current_config(self, only_checked: bool = False) -> VideoBatchConfig:
         operation_type = self.current_operation_type()
+        selected_items = self._checked_items() if only_checked else self.items
         suffix_map = {
             VideoOperationType.COMPRESS: "",
             VideoOperationType.CONVERT: "",
@@ -814,12 +901,12 @@ class BatchVideoToolWidget(QWidget):
             ),
         )
         return VideoBatchConfig(
-            input_files=[item.source_path for item in self.items],
+            input_files=[item.source_path for item in selected_items],
             operation_type=operation_type,
             output_directory=self.output_directory,
             output_suffix=suffix_map[operation_type],
             preserve_structure=self.preserve_structure_checkbox.isChecked(),
-            source_roots={item.source_path: item.import_root for item in self.items},
+            source_roots={item.source_path: item.import_root for item in selected_items},
             compression=VideoCompressionSettings(
                 preset=self.current_compression_preset(),
                 target_format=VideoContainerFormat.MP4,
@@ -989,11 +1076,14 @@ class BatchVideoToolWidget(QWidget):
         if not self.items:
             QMessageBox.warning(self, "缺少视频", "请先导入视频。")
             return
+        if not self._checked_items():
+            QMessageBox.warning(self, "未勾选素材", "请先勾选需要处理的视频。")
+            return
         if self.current_operation_type() == VideoOperationType.ADD_LOGO and self.logo_path is None:
             QMessageBox.warning(self, "缺少 Logo", "请先选择一张 Logo 图片。")
             return
 
-        config = self.current_config()
+        config = self.current_config(only_checked=True)
         if config.output_directory is None:
             suggested = self.processor.resolve_output_directory(config)
             self.output_directory = suggested
@@ -1062,6 +1152,7 @@ class BatchVideoToolWidget(QWidget):
             self._rebuild_table()
             if self.items:
                 self.video_table.selectRow(min(row, len(self.items) - 1))
+                self.summary_label.setText(f"已移除 1 个视频，剩余 {len(self.items)} 个")
             else:
                 self.summary_label.setText("视频列表已清空")
             self._refresh_selected_metadata()

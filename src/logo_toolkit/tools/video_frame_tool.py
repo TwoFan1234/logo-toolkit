@@ -39,7 +39,8 @@ from logo_toolkit.core.video_frame_processor import (
     VideoFrameJobConfig,
     VideoFrameProcessor,
 )
-from logo_toolkit.ui.theme import toolkit_tool_stylesheet
+from logo_toolkit.ui.selection_helpers import build_check_item, populate_ratio_filter_combo, ratio_matches
+from logo_toolkit.ui.theme import configure_resizable_splitter, toolkit_tool_stylesheet
 
 
 class DropTableWidget(QTableWidget):
@@ -76,6 +77,7 @@ class BatchVideoFrameToolWidget(QWidget):
         self.video_items: list[VideoItem] = []
         self.frame_items: list[FrameImageItem] = []
         self.output_directory: Path | None = None
+        self._table_syncing = False
         self._build_ui()
 
     def _build_ui(self) -> None:
@@ -108,10 +110,13 @@ class BatchVideoFrameToolWidget(QWidget):
         splitter.addWidget(video_panel)
         splitter.addWidget(frame_panel)
         splitter.addWidget(settings_panel)
-        splitter.setStretchFactor(0, 2)
-        splitter.setStretchFactor(1, 2)
-        splitter.setStretchFactor(2, 1)
-        splitter.setSizes([540, 540, 360])
+        configure_resizable_splitter(
+            splitter,
+            [video_panel, frame_panel, settings_panel],
+            stretches=[2, 2, 2],
+            minimum_widths=[220, 220, 220],
+            initial_sizes=[500, 500, 260],
+        )
 
         self._apply_styles()
         self._refresh_output_size_options()
@@ -121,6 +126,7 @@ class BatchVideoFrameToolWidget(QWidget):
         layout = QVBoxLayout(group)
 
         button_row = QHBoxLayout()
+        button_row.setSpacing(8)
         add_files_button = QPushButton("添加视频")
         add_files_button.clicked.connect(self._choose_video_files)
         add_folder_button = QPushButton("导入文件夹")
@@ -131,20 +137,52 @@ class BatchVideoFrameToolWidget(QWidget):
         button_row.addWidget(add_folder_button)
         button_row.addWidget(clear_button)
 
+        ratio_row = QHBoxLayout()
+        ratio_row.setSpacing(8)
+        ratio_label = QLabel("比例筛选")
+        ratio_label.setObjectName("filterLabel")
+        self.video_ratio_filter_combo = QComboBox()
+        populate_ratio_filter_combo(self.video_ratio_filter_combo)
+        video_apply_ratio_button = QPushButton("应用")
+        video_apply_ratio_button.setObjectName("compactButton")
+        video_apply_ratio_button.clicked.connect(self._apply_video_ratio_filter_selection)
+        ratio_row.addWidget(ratio_label)
+        ratio_row.addWidget(self.video_ratio_filter_combo, stretch=1)
+        ratio_row.addWidget(video_apply_ratio_button)
+
+        action_row = QHBoxLayout()
+        action_row.setSpacing(8)
+        video_check_all_button = QPushButton("全选")
+        video_check_all_button.setObjectName("compactButton")
+        video_check_all_button.clicked.connect(lambda: self._set_all_video_items_checked(True))
+        video_uncheck_all_button = QPushButton("清空选择")
+        video_uncheck_all_button.setObjectName("compactButton")
+        video_uncheck_all_button.clicked.connect(lambda: self._set_all_video_items_checked(False))
+        video_remove_button = QPushButton("移除选中")
+        video_remove_button.setObjectName("compactButton")
+        video_remove_button.clicked.connect(self._remove_selected_video_rows)
+        action_row.addWidget(video_check_all_button)
+        action_row.addWidget(video_uncheck_all_button)
+        action_row.addStretch(1)
+        action_row.addWidget(video_remove_button)
+
         self.video_table = DropTableWidget()
-        self.video_table.setColumnCount(6)
-        self.video_table.setHorizontalHeaderLabels(["文件名", "时长", "分辨率", "比例", "状态", "说明"])
-        self.video_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
-        self.video_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
+        self.video_table.setColumnCount(7)
+        self.video_table.setHorizontalHeaderLabels(["执行", "文件名", "时长", "分辨率", "比例", "状态", "说明"])
+        self.video_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
+        self.video_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
         self.video_table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
         self.video_table.horizontalHeader().setSectionResizeMode(3, QHeaderView.ResizeMode.ResizeToContents)
         self.video_table.horizontalHeader().setSectionResizeMode(4, QHeaderView.ResizeMode.ResizeToContents)
-        self.video_table.horizontalHeader().setSectionResizeMode(5, QHeaderView.ResizeMode.Stretch)
+        self.video_table.horizontalHeader().setSectionResizeMode(5, QHeaderView.ResizeMode.ResizeToContents)
+        self.video_table.horizontalHeader().setSectionResizeMode(6, QHeaderView.ResizeMode.Stretch)
         self.video_table.verticalHeader().setVisible(False)
         self.video_table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
+        self.video_table.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
         self.video_table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         self.video_table.setAlternatingRowColors(True)
         self.video_table.paths_dropped.connect(self._load_videos)
+        self.video_table.itemChanged.connect(self._handle_video_table_item_changed)
         self.video_table.setObjectName("videoFrameTable")
 
         hint = QLabel("支持多个视频或文件夹。工具会自动读取分辨率并识别 16:9、1:1、9:16 等比例。")
@@ -152,6 +190,8 @@ class BatchVideoFrameToolWidget(QWidget):
         hint.setObjectName("supportingLabel")
 
         layout.addLayout(button_row)
+        layout.addLayout(ratio_row)
+        layout.addLayout(action_row)
         layout.addWidget(hint)
         layout.addWidget(self.video_table, stretch=1)
         return group
@@ -161,6 +201,7 @@ class BatchVideoFrameToolWidget(QWidget):
         layout = QVBoxLayout(group)
 
         button_row = QHBoxLayout()
+        button_row.setSpacing(8)
         add_files_button = QPushButton("添加边框")
         add_files_button.clicked.connect(self._choose_frame_files)
         add_folder_button = QPushButton("导入文件夹")
@@ -171,20 +212,52 @@ class BatchVideoFrameToolWidget(QWidget):
         button_row.addWidget(add_folder_button)
         button_row.addWidget(clear_button)
 
+        ratio_row = QHBoxLayout()
+        ratio_row.setSpacing(8)
+        ratio_label = QLabel("比例筛选")
+        ratio_label.setObjectName("filterLabel")
+        self.frame_ratio_filter_combo = QComboBox()
+        populate_ratio_filter_combo(self.frame_ratio_filter_combo)
+        frame_apply_ratio_button = QPushButton("应用")
+        frame_apply_ratio_button.setObjectName("compactButton")
+        frame_apply_ratio_button.clicked.connect(self._apply_frame_ratio_filter_selection)
+        ratio_row.addWidget(ratio_label)
+        ratio_row.addWidget(self.frame_ratio_filter_combo, stretch=1)
+        ratio_row.addWidget(frame_apply_ratio_button)
+
+        action_row = QHBoxLayout()
+        action_row.setSpacing(8)
+        frame_check_all_button = QPushButton("全选")
+        frame_check_all_button.setObjectName("compactButton")
+        frame_check_all_button.clicked.connect(lambda: self._set_all_frame_items_checked(True))
+        frame_uncheck_all_button = QPushButton("清空选择")
+        frame_uncheck_all_button.setObjectName("compactButton")
+        frame_uncheck_all_button.clicked.connect(lambda: self._set_all_frame_items_checked(False))
+        frame_remove_button = QPushButton("移除选中")
+        frame_remove_button.setObjectName("compactButton")
+        frame_remove_button.clicked.connect(self._remove_selected_frame_rows)
+        action_row.addWidget(frame_check_all_button)
+        action_row.addWidget(frame_uncheck_all_button)
+        action_row.addStretch(1)
+        action_row.addWidget(frame_remove_button)
+
         self.frame_table = DropTableWidget()
-        self.frame_table.setColumnCount(5)
-        self.frame_table.setHorizontalHeaderLabels(["文件名", "分辨率", "比例", "状态", "说明"])
-        self.frame_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
-        self.frame_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
+        self.frame_table.setColumnCount(6)
+        self.frame_table.setHorizontalHeaderLabels(["执行", "文件名", "分辨率", "比例", "状态", "说明"])
+        self.frame_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
+        self.frame_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
         self.frame_table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
         self.frame_table.horizontalHeader().setSectionResizeMode(3, QHeaderView.ResizeMode.ResizeToContents)
-        self.frame_table.horizontalHeader().setSectionResizeMode(4, QHeaderView.ResizeMode.Stretch)
+        self.frame_table.horizontalHeader().setSectionResizeMode(4, QHeaderView.ResizeMode.ResizeToContents)
+        self.frame_table.horizontalHeader().setSectionResizeMode(5, QHeaderView.ResizeMode.Stretch)
         self.frame_table.verticalHeader().setVisible(False)
         self.frame_table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
+        self.frame_table.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
         self.frame_table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         self.frame_table.setAlternatingRowColors(True)
         self.frame_table.itemSelectionChanged.connect(self._refresh_output_size_options)
         self.frame_table.paths_dropped.connect(self._load_frames)
+        self.frame_table.itemChanged.connect(self._handle_frame_table_item_changed)
         self.frame_table.setObjectName("videoFrameTable")
 
         hint = QLabel("可以一次导入多张边框图。默认每张图按自己的尺寸输出，也可选择自动标准尺寸。")
@@ -192,6 +265,8 @@ class BatchVideoFrameToolWidget(QWidget):
         hint.setObjectName("supportingLabel")
 
         layout.addLayout(button_row)
+        layout.addLayout(ratio_row)
+        layout.addLayout(action_row)
         layout.addWidget(hint)
         layout.addWidget(self.frame_table, stretch=1)
         return group
@@ -216,7 +291,7 @@ class BatchVideoFrameToolWidget(QWidget):
         self.output_dir_button = QPushButton("选择导出目录")
         self.output_dir_button.clicked.connect(self._choose_output_dir)
         self.preserve_structure_checkbox = QCheckBox("导出时保持原视频文件夹结构")
-        self.preserve_structure_checkbox.setChecked(True)
+        self.preserve_structure_checkbox.setChecked(False)
 
         self.run_button = QPushButton("开始批量套边框")
         self.run_button.setObjectName("primaryRunButton")
@@ -299,7 +374,7 @@ class BatchVideoFrameToolWidget(QWidget):
                 item.message = str(exc)
             self.video_items.append(item)
         self._rebuild_video_table()
-        self.summary_label.setText(f"已载入 {len(self.video_items)} 个视频")
+        self.summary_label.setText(f"已载入 {len(self.video_items)} 个视频，当前勾选 {len(self._checked_video_items())} 个")
 
     def _load_frames(self, raw_paths: list[str]) -> None:
         collected_frames = collect_images(raw_paths)
@@ -319,7 +394,7 @@ class BatchVideoFrameToolWidget(QWidget):
         if self.frame_table.rowCount() > 0 and self.frame_table.currentRow() < 0:
             self.frame_table.selectRow(0)
         self._refresh_output_size_options()
-        self.summary_label.setText(f"已载入 {len(self.frame_items)} 张边框图")
+        self.summary_label.setText(f"已载入 {len(self.frame_items)} 张边框图，当前勾选 {len(self._checked_frame_items())} 张")
 
     def _clear_videos(self) -> None:
         self.video_items.clear()
@@ -333,30 +408,119 @@ class BatchVideoFrameToolWidget(QWidget):
         self.summary_label.setText("边框图片列表已清空")
 
     def _rebuild_video_table(self) -> None:
+        self._table_syncing = True
         self.video_table.setRowCount(len(self.video_items))
         for row, item in enumerate(self.video_items):
-            self.video_table.setItem(row, 0, self._table_item(item.display_name, str(item.source_path)))
-            self.video_table.setItem(row, 1, QTableWidgetItem(item.duration_text))
-            self.video_table.setItem(row, 2, QTableWidgetItem(item.resolution_text))
+            self.video_table.setItem(row, 0, build_check_item(item.selected_for_batch))
+            self.video_table.setItem(row, 1, self._table_item(item.display_name, str(item.source_path)))
+            self.video_table.setItem(row, 2, QTableWidgetItem(item.duration_text))
+            self.video_table.setItem(row, 3, QTableWidgetItem(item.resolution_text))
             ratio = VideoFrameProcessor.ratio_label(item.width, item.height) if item.width and item.height else "-"
-            self.video_table.setItem(row, 3, QTableWidgetItem(ratio))
-            self.video_table.setItem(row, 4, QTableWidgetItem(item.status))
-            self.video_table.setItem(row, 5, self._table_item(item.message, item.message))
+            self.video_table.setItem(row, 4, QTableWidgetItem(ratio))
+            self.video_table.setItem(row, 5, QTableWidgetItem(item.status))
+            self.video_table.setItem(row, 6, self._table_item(item.message, item.message))
+        self._table_syncing = False
 
     def _rebuild_frame_table(self) -> None:
+        self._table_syncing = True
         self.frame_table.setRowCount(len(self.frame_items))
         for row, item in enumerate(self.frame_items):
-            self.frame_table.setItem(row, 0, self._table_item(item.display_name, str(item.source_path)))
-            self.frame_table.setItem(row, 1, QTableWidgetItem(item.resolution_text))
-            self.frame_table.setItem(row, 2, QTableWidgetItem(item.ratio_text))
-            self.frame_table.setItem(row, 3, QTableWidgetItem(item.status))
-            self.frame_table.setItem(row, 4, self._table_item(item.message, item.message))
+            self.frame_table.setItem(row, 0, build_check_item(item.selected_for_batch))
+            self.frame_table.setItem(row, 1, self._table_item(item.display_name, str(item.source_path)))
+            self.frame_table.setItem(row, 2, QTableWidgetItem(item.resolution_text))
+            self.frame_table.setItem(row, 3, QTableWidgetItem(item.ratio_text))
+            self.frame_table.setItem(row, 4, QTableWidgetItem(item.status))
+            self.frame_table.setItem(row, 5, self._table_item(item.message, item.message))
+        self._table_syncing = False
 
     def _table_item(self, text: str, tooltip: str = "") -> QTableWidgetItem:
         item = QTableWidgetItem(text)
         if tooltip:
             item.setToolTip(tooltip)
         return item
+
+    def _handle_video_table_item_changed(self, table_item: QTableWidgetItem) -> None:
+        if self._table_syncing or table_item.column() != 0:
+            return
+        row = table_item.row()
+        if 0 <= row < len(self.video_items):
+            self.video_items[row].selected_for_batch = table_item.checkState() == Qt.CheckState.Checked
+
+    def _handle_frame_table_item_changed(self, table_item: QTableWidgetItem) -> None:
+        if self._table_syncing or table_item.column() != 0:
+            return
+        row = table_item.row()
+        if 0 <= row < len(self.frame_items):
+            self.frame_items[row].selected_for_batch = table_item.checkState() == Qt.CheckState.Checked
+
+    def _checked_video_items(self) -> list[VideoItem]:
+        return [item for item in self.video_items if item.selected_for_batch]
+
+    def _checked_frame_items(self) -> list[FrameImageItem]:
+        return [item for item in self.frame_items if item.selected_for_batch]
+
+    def _set_all_video_items_checked(self, checked: bool) -> None:
+        for item in self.video_items:
+            item.selected_for_batch = checked
+        self._rebuild_video_table()
+        self.summary_label.setText(f"已勾选 {len(self._checked_video_items())}/{len(self.video_items)} 个视频")
+
+    def _set_all_frame_items_checked(self, checked: bool) -> None:
+        for item in self.frame_items:
+            item.selected_for_batch = checked
+        self._rebuild_frame_table()
+        self.summary_label.setText(f"已勾选 {len(self._checked_frame_items())}/{len(self.frame_items)} 张边框图")
+        self._refresh_output_size_options()
+
+    def _apply_video_ratio_filter_selection(self) -> None:
+        ratio_filter = str(self.video_ratio_filter_combo.currentData() or "all")
+        for item in self.video_items:
+            item.selected_for_batch = ratio_matches(item.width, item.height, ratio_filter)
+        self._rebuild_video_table()
+        self.summary_label.setText(
+            f"已按 {self.video_ratio_filter_combo.currentText()} 勾选 {len(self._checked_video_items())} 个视频"
+        )
+
+    def _apply_frame_ratio_filter_selection(self) -> None:
+        ratio_filter = str(self.frame_ratio_filter_combo.currentData() or "all")
+        for item in self.frame_items:
+            item.selected_for_batch = ratio_matches(item.width, item.height, ratio_filter)
+        self._rebuild_frame_table()
+        self.summary_label.setText(
+            f"已按 {self.frame_ratio_filter_combo.currentText()} 勾选 {len(self._checked_frame_items())} 张边框图"
+        )
+        self._refresh_output_size_options()
+
+    def _remove_selected_video_rows(self) -> None:
+        rows = sorted({index.row() for index in self.video_table.selectionModel().selectedRows()}, reverse=True)
+        if not rows:
+            QMessageBox.information(self, "未选择素材", "请先在列表里选中要移除的视频。")
+            return
+        for row in rows:
+            if 0 <= row < len(self.video_items):
+                self.video_items.pop(row)
+        self._rebuild_video_table()
+        if self.video_items:
+            self.video_table.selectRow(min(rows[-1], len(self.video_items) - 1))
+            self.summary_label.setText(f"已移除 {len(rows)} 个视频，剩余 {len(self.video_items)} 个")
+        else:
+            self.summary_label.setText("视频列表已清空")
+
+    def _remove_selected_frame_rows(self) -> None:
+        rows = sorted({index.row() for index in self.frame_table.selectionModel().selectedRows()}, reverse=True)
+        if not rows:
+            QMessageBox.information(self, "未选择素材", "请先在列表里选中要移除的边框图。")
+            return
+        for row in rows:
+            if 0 <= row < len(self.frame_items):
+                self.frame_items.pop(row)
+        self._rebuild_frame_table()
+        if self.frame_items:
+            self.frame_table.selectRow(min(rows[-1], len(self.frame_items) - 1))
+            self.summary_label.setText(f"已移除 {len(rows)} 张边框图，剩余 {len(self.frame_items)} 张")
+        else:
+            self.summary_label.setText("边框图片列表已清空")
+        self._refresh_output_size_options()
 
     def _selected_frame_item(self) -> FrameImageItem | None:
         row = self.frame_table.currentRow()
@@ -407,13 +571,15 @@ class BatchVideoFrameToolWidget(QWidget):
         custom_size = None
         if mode == OUTPUT_SIZE_CUSTOM:
             custom_size = payload if isinstance(payload, tuple) else (self.custom_width_spin.value(), self.custom_height_spin.value())
+        selected_videos = self._checked_video_items()
+        selected_frames = self._checked_frame_items()
         return VideoFrameJobConfig(
-            input_files=[item.source_path for item in self.video_items],
-            frame_files=[item.source_path for item in self.frame_items],
+            input_files=[item.source_path for item in selected_videos],
+            frame_files=[item.source_path for item in selected_frames],
             output_directory=self.output_directory,
             output_size_mode=mode,
             custom_output_size=custom_size,
-            source_roots={item.source_path: item.import_root for item in self.video_items}
+            source_roots={item.source_path: item.import_root for item in selected_videos}
             if self.preserve_structure_checkbox.isChecked()
             else {},
         )
@@ -424,6 +590,12 @@ class BatchVideoFrameToolWidget(QWidget):
             return
         if not self.frame_items:
             QMessageBox.warning(self, "缺少边框", "请先导入边框图片。")
+            return
+        if not self._checked_video_items():
+            QMessageBox.warning(self, "未勾选视频", "请至少勾选一个要处理的视频。")
+            return
+        if not self._checked_frame_items():
+            QMessageBox.warning(self, "未勾选边框", "请至少勾选一张要使用的边框图。")
             return
         config = self._current_config()
         if self.output_directory is None:

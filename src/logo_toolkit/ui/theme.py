@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 from PySide6.QtGui import QColor
-from PySide6.QtWidgets import QGraphicsDropShadowEffect, QWidget
+from PySide6.QtWidgets import QGraphicsDropShadowEffect, QSizePolicy, QSplitter, QWidget
 
 
-def apply_shadow(widget: QWidget, blur_radius: int = 32, y_offset: int = 10, alpha: int = 22) -> None:
+def apply_shadow(widget: QWidget, blur_radius: int = 38, y_offset: int = 12, alpha: int = 16) -> None:
     effect = QGraphicsDropShadowEffect(widget)
     effect.setBlurRadius(blur_radius)
     effect.setOffset(0, y_offset)
@@ -12,23 +14,42 @@ def apply_shadow(widget: QWidget, blur_radius: int = 32, y_offset: int = 10, alp
     widget.setGraphicsEffect(effect)
 
 
+def configure_resizable_splitter(
+    splitter: QSplitter,
+    panels: list[QWidget],
+    *,
+    stretches: list[int],
+    minimum_widths: list[int],
+    initial_sizes: list[int],
+) -> None:
+    splitter.setChildrenCollapsible(False)
+    splitter.setOpaqueResize(True)
+    splitter.setHandleWidth(max(splitter.handleWidth(), 14))
+    for index, panel in enumerate(panels):
+        panel.setMinimumWidth(minimum_widths[index])
+        panel.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Expanding)
+        splitter.setCollapsible(index, False)
+        splitter.setStretchFactor(index, stretches[index])
+    splitter.setSizes(initial_sizes)
+
+
 def main_window_stylesheet() -> str:
     return """
         QMainWindow {
-            background: #f5f5f7;
+            background: #f3f4f6;
             font-family: "Segoe UI Variable", "Segoe UI", "Microsoft YaHei UI";
             color: #1d1d1f;
         }
         #sidebarFrame {
-            background: rgba(255, 255, 255, 0.78);
-            border-radius: 28px;
-            border: 1px solid rgba(0, 0, 0, 0.08);
+            background: rgba(255, 255, 255, 0.92);
+            border-radius: 30px;
+            border: 1px solid rgba(15, 23, 42, 0.05);
         }
         #sidebarTitleLabel {
             color: #1d1d1f;
-            font-size: 17px;
-            font-weight: 700;
-            letter-spacing: 0.2px;
+            font-size: 18px;
+            font-weight: 720;
+            letter-spacing: 0.15px;
         }
         #sidebarCopyLabel,
         #toolDescriptionLabel {
@@ -37,39 +58,39 @@ def main_window_stylesheet() -> str:
             line-height: 1.45em;
         }
         #toolList {
-            background: rgba(248, 248, 250, 0.72);
-            border: 1px solid rgba(0, 0, 0, 0.06);
-            border-radius: 22px;
-            padding: 10px;
+            background: #f8f9fb;
+            border: 1px solid rgba(15, 23, 42, 0.04);
+            border-radius: 24px;
+            padding: 12px;
             color: #1d1d1f;
             outline: none;
         }
         #toolList::item {
             background: transparent;
-            padding: 13px 14px;
-            border-radius: 16px;
-            margin: 3px 0;
+            padding: 14px 15px;
+            border-radius: 18px;
+            margin: 4px 0;
             border: 1px solid transparent;
         }
         #toolList::item:hover {
-            background: rgba(0, 113, 227, 0.08);
-            border: 1px solid rgba(0, 113, 227, 0.10);
+            background: rgba(0, 113, 227, 0.07);
+            border: 1px solid rgba(0, 113, 227, 0.08);
         }
         #toolList::item:selected {
             background: #ffffff;
             color: #0071e3;
-            border: 1px solid rgba(0, 113, 227, 0.18);
-            font-weight: 700;
+            border: 1px solid rgba(0, 113, 227, 0.14);
+            font-weight: 720;
         }
         #helperCard {
-            background: rgba(255, 255, 255, 0.86);
-            border-radius: 22px;
-            border: 1px solid rgba(0, 0, 0, 0.07);
+            background: rgba(255, 255, 255, 0.94);
+            border-radius: 24px;
+            border: 1px solid rgba(15, 23, 42, 0.05);
         }
         #helperTitleLabel {
             color: #1d1d1f;
             font-size: 13px;
-            font-weight: 700;
+            font-weight: 720;
         }
         #helperCopyLabel {
             color: #6e6e73;
@@ -77,9 +98,9 @@ def main_window_stylesheet() -> str:
             line-height: 1.45em;
         }
         #contentFrame {
-            background: rgba(255, 255, 255, 0.72);
-            border-radius: 30px;
-            border: 1px solid rgba(0, 0, 0, 0.08);
+            background: rgba(255, 255, 255, 0.94);
+            border-radius: 32px;
+            border: 1px solid rgba(15, 23, 42, 0.05);
         }
         #toolStack {
             background: transparent;
@@ -88,6 +109,7 @@ def main_window_stylesheet() -> str:
 
 
 def toolkit_tool_stylesheet() -> str:
+    arrow_path = (Path(__file__).resolve().parent / "assets" / "chevron-down.svg").as_posix()
     return """
         QWidget {
             font-family: "Segoe UI Variable", "Segoe UI", "Microsoft YaHei UI";
@@ -95,36 +117,43 @@ def toolkit_tool_stylesheet() -> str:
             font-size: 13px;
         }
         QGroupBox {
-            background: rgba(255, 255, 255, 0.84);
-            border: 1px solid rgba(0, 0, 0, 0.08);
-            border-radius: 18px;
+            background: rgba(255, 255, 255, 0.95);
+            border: 1px solid rgba(15, 23, 42, 0.05);
+            border-radius: 22px;
             margin-top: 14px;
-            padding-top: 14px;
+            padding-top: 16px;
             font-weight: 650;
             color: #1d1d1f;
         }
         QGroupBox::title {
-            left: 18px;
+            left: 20px;
             padding: 0 8px;
             color: #3a3a3c;
+            font-weight: 700;
             background: transparent;
         }
         QPushButton {
-            background: #1d1d1f;
-            color: #ffffff;
-            border: 1px solid rgba(0, 0, 0, 0.08);
-            border-radius: 12px;
+            background: #edf2fa;
+            color: #1d1d1f;
+            border: 1px solid rgba(154, 170, 194, 0.45);
+            border-radius: 14px;
             padding: 9px 14px;
             font-weight: 650;
             min-height: 20px;
+            min-width: 72px;
+        }
+        QPushButton#compactButton {
+            min-width: 0;
+            padding: 7px 12px;
+            border-radius: 12px;
+            font-size: 12px;
+            font-weight: 620;
         }
         QPushButton:hover {
-            background: #2c2c2e;
+            background: #e3eaf6;
         }
         QPushButton:pressed {
-            background: #111113;
-            padding-top: 10px;
-            padding-bottom: 8px;
+            background: #d9e2f1;
         }
         QPushButton:disabled {
             background: #d1d1d6;
@@ -134,10 +163,11 @@ def toolkit_tool_stylesheet() -> str:
         QPushButton#primaryRunButton {
             background: #0071e3;
             border: 1px solid rgba(0, 113, 227, 0.18);
-            border-radius: 15px;
+            color: #ffffff;
+            border-radius: 16px;
             font-size: 15px;
             font-weight: 750;
-            padding: 13px 18px;
+            padding: 14px 18px;
         }
         QPushButton#primaryRunButton:hover {
             background: #147ce5;
@@ -146,20 +176,48 @@ def toolkit_tool_stylesheet() -> str:
             background: #005bb5;
         }
         QLineEdit, QComboBox, QSpinBox, QDoubleSpinBox {
-            background: rgba(255, 255, 255, 0.96);
-            border: 1px solid rgba(0, 0, 0, 0.13);
-            border-radius: 11px;
-            padding: 7px 9px;
+            background: #fbfbfd;
+            border: 1px solid rgba(15, 23, 42, 0.10);
+            border-radius: 12px;
+            padding: 8px 10px;
             min-height: 20px;
             selection-background-color: #0071e3;
+        }
+        QComboBox {
+            padding-right: 42px;
+            font-weight: 600;
         }
         QLineEdit:focus, QComboBox:focus, QSpinBox:focus, QDoubleSpinBox:focus {
             border: 1px solid #0071e3;
             background: #ffffff;
         }
         QComboBox::drop-down {
-            border: none;
-            width: 28px;
+            subcontrol-origin: padding;
+            subcontrol-position: top right;
+            width: 34px;
+            margin: 2px;
+            border-left: 1px solid rgba(15, 23, 42, 0.08);
+            border-top-right-radius: 10px;
+            border-bottom-right-radius: 10px;
+            background: #f1f4f8;
+        }
+        QComboBox::down-arrow {
+            width: 10px;
+            height: 10px;
+            image: url(__ARROW_PATH__);
+        }
+        QComboBox QAbstractItemView {
+            background: #ffffff;
+            border: 1px solid rgba(15, 23, 42, 0.10);
+            border-radius: 12px;
+            padding: 6px;
+            selection-background-color: rgba(0, 113, 227, 0.12);
+            selection-color: #1d1d1f;
+        }
+        #filterLabel {
+            color: #6e6e73;
+            font-size: 12px;
+            font-weight: 620;
         }
         QCheckBox {
             color: #3a3a3c;
@@ -172,13 +230,13 @@ def toolkit_tool_stylesheet() -> str:
             color: #6e6e73;
         }
         #previewCard {
-            background: rgba(255, 255, 255, 0.82);
-            border: 1px solid rgba(0, 0, 0, 0.08);
-            border-radius: 22px;
+            background: rgba(255, 255, 255, 0.96);
+            border: 1px solid rgba(15, 23, 42, 0.05);
+            border-radius: 24px;
         }
         #previewTitle {
             color: #1d1d1f;
-            font-size: 17px;
+            font-size: 18px;
             font-weight: 750;
         }
         #previewBadge {
@@ -190,43 +248,43 @@ def toolkit_tool_stylesheet() -> str:
             font-weight: 700;
         }
         #previewTips {
-            background: rgba(245, 245, 247, 0.92);
-            border: 1px solid rgba(0, 0, 0, 0.06);
-            border-radius: 14px;
-            padding: 9px 11px;
+            background: #f7f8fa;
+            border: 1px solid rgba(15, 23, 42, 0.05);
+            border-radius: 16px;
+            padding: 10px 12px;
             color: #6e6e73;
             font-size: 12px;
             line-height: 1.45em;
         }
         #previewImageLabel {
             background: #ffffff;
-            border: 1px solid rgba(0, 0, 0, 0.08);
-            border-radius: 18px;
+            border: 1px solid rgba(15, 23, 42, 0.05);
+            border-radius: 20px;
             color: #86868b;
         }
         QTableWidget {
-            background: rgba(255, 255, 255, 0.92);
-            alternate-background-color: #f8f8fa;
-            border: 1px solid rgba(0, 0, 0, 0.08);
-            border-radius: 14px;
+            background: rgba(255, 255, 255, 0.96);
+            alternate-background-color: #fafbfc;
+            border: 1px solid rgba(15, 23, 42, 0.05);
+            border-radius: 16px;
             padding: 2px;
-            gridline-color: rgba(0, 0, 0, 0.06);
+            gridline-color: rgba(15, 23, 42, 0.04);
             selection-background-color: rgba(0, 113, 227, 0.12);
             selection-color: #1d1d1f;
         }
         QHeaderView::section {
-            background: #f5f5f7;
+            background: #f7f8fa;
             color: #6e6e73;
             border: none;
-            border-right: 1px solid rgba(0, 0, 0, 0.06);
-            border-bottom: 1px solid rgba(0, 0, 0, 0.07);
-            padding: 9px 7px;
+            border-right: 1px solid rgba(15, 23, 42, 0.04);
+            border-bottom: 1px solid rgba(15, 23, 42, 0.05);
+            padding: 10px 8px;
             font-weight: 700;
         }
         QProgressBar {
-            background: #e8e8ed;
+            background: #e9ebef;
             border: none;
-            border-radius: 10px;
+            border-radius: 11px;
             text-align: center;
             min-height: 20px;
             color: #3a3a3c;
@@ -243,6 +301,10 @@ def toolkit_tool_stylesheet() -> str:
         QSplitter::handle {
             background: transparent;
         }
+        QSplitter::handle:hover {
+            background: rgba(0, 113, 227, 0.06);
+            border-radius: 4px;
+        }
         QScrollBar:vertical {
             background: transparent;
             width: 10px;
@@ -257,4 +319,4 @@ def toolkit_tool_stylesheet() -> str:
         QScrollBar::sub-line:vertical {
             height: 0;
         }
-    """
+    """.replace("__ARROW_PATH__", arrow_path)

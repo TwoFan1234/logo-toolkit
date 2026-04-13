@@ -44,7 +44,8 @@ from logo_toolkit.core.models import (
     TransformFormat,
 )
 from logo_toolkit.tools.logo_tool import ImageTableWidget, ImportGroupBox
-from logo_toolkit.ui.theme import toolkit_tool_stylesheet
+from logo_toolkit.ui.selection_helpers import build_check_item, populate_ratio_filter_combo, ratio_matches
+from logo_toolkit.ui.theme import configure_resizable_splitter, toolkit_tool_stylesheet
 
 
 class BatchTransformToolWidget(QWidget):
@@ -55,6 +56,7 @@ class BatchTransformToolWidget(QWidget):
         self.output_directory: Path | None = None
         self.thumbnail_size = QSize(72, 72)
         self._preview_pixmap = QPixmap()
+        self._table_syncing = False
         self._build_ui()
 
     def _build_ui(self) -> None:
@@ -85,10 +87,13 @@ class BatchTransformToolWidget(QWidget):
         splitter.addWidget(image_panel)
         splitter.addWidget(preview_panel)
         splitter.addWidget(settings_panel)
-        splitter.setStretchFactor(0, 1)
-        splitter.setStretchFactor(1, 2)
-        splitter.setStretchFactor(2, 0)
-        splitter.setSizes([620, 860, 360])
+        configure_resizable_splitter(
+            splitter,
+            [image_panel, preview_panel, settings_panel],
+            stretches=[2, 3, 2],
+            minimum_widths=[220, 240, 220],
+            initial_sizes=[560, 720, 300],
+        )
 
         self._apply_styles()
         self._update_resize_ui()
@@ -101,6 +106,7 @@ class BatchTransformToolWidget(QWidget):
         layout = QVBoxLayout(group)
 
         buttons_layout = QHBoxLayout()
+        buttons_layout.setSpacing(8)
         add_files_button = QPushButton("添加图片")
         add_files_button.clicked.connect(self._choose_files)
         add_folder_button = QPushButton("导入文件夹")
@@ -111,21 +117,52 @@ class BatchTransformToolWidget(QWidget):
         buttons_layout.addWidget(add_folder_button)
         buttons_layout.addWidget(clear_button)
 
+        ratio_layout = QHBoxLayout()
+        ratio_layout.setSpacing(8)
+        ratio_label = QLabel("比例筛选")
+        ratio_label.setObjectName("filterLabel")
+        self.ratio_filter_combo = QComboBox()
+        populate_ratio_filter_combo(self.ratio_filter_combo)
+        self.apply_ratio_button = QPushButton("应用")
+        self.apply_ratio_button.setObjectName("compactButton")
+        self.apply_ratio_button.clicked.connect(self._apply_ratio_filter_selection)
+        ratio_layout.addWidget(ratio_label)
+        ratio_layout.addWidget(self.ratio_filter_combo, stretch=1)
+        ratio_layout.addWidget(self.apply_ratio_button)
+
+        action_layout = QHBoxLayout()
+        action_layout.setSpacing(8)
+        self.check_all_button = QPushButton("全选")
+        self.check_all_button.setObjectName("compactButton")
+        self.check_all_button.clicked.connect(lambda: self._set_all_items_checked(True))
+        self.clear_check_button = QPushButton("清空选择")
+        self.clear_check_button.setObjectName("compactButton")
+        self.clear_check_button.clicked.connect(lambda: self._set_all_items_checked(False))
+        self.remove_selected_button = QPushButton("移除选中")
+        self.remove_selected_button.setObjectName("compactButton")
+        self.remove_selected_button.clicked.connect(self._remove_selected_rows)
+        action_layout.addWidget(self.check_all_button)
+        action_layout.addWidget(self.clear_check_button)
+        action_layout.addStretch(1)
+        action_layout.addWidget(self.remove_selected_button)
+
         self.image_table = ImageTableWidget()
-        self.image_table.setColumnCount(6)
-        self.image_table.setHorizontalHeaderLabels(["预览", "文件名", "导入根目录", "分辨率", "状态", "说明"])
+        self.image_table.setColumnCount(7)
+        self.image_table.setHorizontalHeaderLabels(["执行", "预览", "文件名", "导入根目录", "分辨率", "状态", "说明"])
         self.image_table.setIconSize(self.thumbnail_size)
         self.image_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
         self.image_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
-        self.image_table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeMode.Stretch)
-        self.image_table.horizontalHeader().setSectionResizeMode(3, QHeaderView.ResizeMode.ResizeToContents)
+        self.image_table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
+        self.image_table.horizontalHeader().setSectionResizeMode(3, QHeaderView.ResizeMode.Stretch)
         self.image_table.horizontalHeader().setSectionResizeMode(4, QHeaderView.ResizeMode.ResizeToContents)
-        self.image_table.horizontalHeader().setSectionResizeMode(5, QHeaderView.ResizeMode.Stretch)
+        self.image_table.horizontalHeader().setSectionResizeMode(5, QHeaderView.ResizeMode.ResizeToContents)
+        self.image_table.horizontalHeader().setSectionResizeMode(6, QHeaderView.ResizeMode.Stretch)
         self.image_table.verticalHeader().setVisible(False)
         self.image_table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
-        self.image_table.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
+        self.image_table.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
         self.image_table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         self.image_table.itemSelectionChanged.connect(self._refresh_preview)
+        self.image_table.itemChanged.connect(self._handle_table_item_changed)
         self.image_table.paths_dropped.connect(self._load_images)
         self.image_table.setMinimumHeight(420)
         self.image_table.setWordWrap(False)
@@ -137,6 +174,8 @@ class BatchTransformToolWidget(QWidget):
         drop_hint.setObjectName("supportingLabel")
 
         layout.addLayout(buttons_layout)
+        layout.addLayout(ratio_layout)
+        layout.addLayout(action_layout)
         layout.addWidget(drop_hint)
         layout.addWidget(self.image_table, stretch=1)
         return group
@@ -226,7 +265,7 @@ class BatchTransformToolWidget(QWidget):
         self.output_dir_button = QPushButton("选择导出目录")
         self.output_dir_button.clicked.connect(self._choose_output_dir)
         self.preserve_structure_checkbox = QCheckBox("导出时保持原文件夹结构")
-        self.preserve_structure_checkbox.setChecked(True)
+        self.preserve_structure_checkbox.setChecked(False)
 
         self.export_hint_label = QLabel()
         self.export_hint_label.setWordWrap(True)
@@ -289,7 +328,7 @@ class BatchTransformToolWidget(QWidget):
 
         self.preview_image_label = QLabel("导入图片后在这里预览")
         self.preview_image_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.preview_image_label.setMinimumSize(540, 380)
+        self.preview_image_label.setMinimumSize(220, 220)
         self.preview_image_label.setObjectName("previewImageLabel")
 
         layout.addLayout(title_row)
@@ -432,15 +471,16 @@ class BatchTransformToolWidget(QWidget):
             target_height=self.target_height_spin.value(),
             keep_aspect_ratio=self.keep_aspect_checkbox.isChecked(),
         )
+        selected_items = self._checked_items()
         return BatchTransformConfig(
-            input_files=[item.source_path for item in self.items],
+            input_files=[item.source_path for item in selected_items],
             transform_format=self.current_transform_format(),
             compression_level=self.current_compression_level(),
             resize_config=resize_config,
             export_mode=self.current_export_mode(),
             output_directory=self.output_directory,
             preserve_structure=self.preserve_structure_checkbox.isChecked(),
-            source_roots={item.source_path: item.import_root for item in self.items},
+            source_roots={item.source_path: item.import_root for item in selected_items},
         )
 
     def _update_resize_ui(self) -> None:
@@ -526,32 +566,74 @@ class BatchTransformToolWidget(QWidget):
             self.items.append(image_item)
 
         self._rebuild_table()
-        self.summary_label.setText(f"已载入 {len(self.items)} 张图片")
+        self.summary_label.setText(f"已载入 {len(self.items)} 张图片，当前勾选 {len(self._checked_items())} 张")
         if self.image_table.rowCount() > 0 and self.image_table.currentRow() < 0:
             self.image_table.selectRow(0)
         self._refresh_preview()
 
     def _rebuild_table(self) -> None:
+        self._table_syncing = True
         self.image_table.setRowCount(len(self.items))
         for row, item in enumerate(self.items):
+            self.image_table.setItem(row, 0, build_check_item(item.selected_for_batch))
             preview_item = self._create_thumbnail_item(item.source_path)
             preview_item.setToolTip(str(item.source_path))
-            self.image_table.setItem(row, 0, preview_item)
+            self.image_table.setItem(row, 1, preview_item)
             self.image_table.setRowHeight(row, self.thumbnail_size.height() + 12)
 
             name_item = QTableWidgetItem(item.display_name)
             name_item.setToolTip(str(item.source_path))
-            self.image_table.setItem(row, 1, name_item)
+            self.image_table.setItem(row, 2, name_item)
 
             root_text = str(item.import_root or item.source_path.parent)
             root_item = QTableWidgetItem(root_text)
             root_item.setToolTip(root_text)
-            self.image_table.setItem(row, 2, root_item)
-            self.image_table.setItem(row, 3, QTableWidgetItem(item.resolution_text))
-            self.image_table.setItem(row, 4, QTableWidgetItem(item.status))
+            self.image_table.setItem(row, 3, root_item)
+            self.image_table.setItem(row, 4, QTableWidgetItem(item.resolution_text))
+            self.image_table.setItem(row, 5, QTableWidgetItem(item.status))
             message_item = QTableWidgetItem(item.message)
             message_item.setToolTip(item.message)
-            self.image_table.setItem(row, 5, message_item)
+            self.image_table.setItem(row, 6, message_item)
+        self._table_syncing = False
+
+    def _handle_table_item_changed(self, table_item: QTableWidgetItem) -> None:
+        if self._table_syncing or table_item.column() != 0:
+            return
+        row = table_item.row()
+        if 0 <= row < len(self.items):
+            self.items[row].selected_for_batch = table_item.checkState() == Qt.CheckState.Checked
+
+    def _checked_items(self) -> list[ImageItem]:
+        return [item for item in self.items if item.selected_for_batch]
+
+    def _set_all_items_checked(self, checked: bool) -> None:
+        for item in self.items:
+            item.selected_for_batch = checked
+        self._rebuild_table()
+        self.summary_label.setText(f"已勾选 {len(self._checked_items())}/{len(self.items)} 张图片")
+
+    def _apply_ratio_filter_selection(self) -> None:
+        ratio_filter = str(self.ratio_filter_combo.currentData() or "all")
+        for item in self.items:
+            item.selected_for_batch = ratio_matches(item.width, item.height, ratio_filter)
+        self._rebuild_table()
+        self.summary_label.setText(f"已按 {self.ratio_filter_combo.currentText()} 勾选 {len(self._checked_items())} 张图片")
+
+    def _remove_selected_rows(self) -> None:
+        rows = sorted({index.row() for index in self.image_table.selectionModel().selectedRows()}, reverse=True)
+        if not rows:
+            QMessageBox.information(self, "未选择素材", "请先在列表里选中要移除的图片。")
+            return
+        for row in rows:
+            if 0 <= row < len(self.items):
+                self.items.pop(row)
+        self._rebuild_table()
+        if self.items:
+            self.image_table.selectRow(min(rows[-1], len(self.items) - 1))
+            self.summary_label.setText(f"已移除 {len(rows)} 张图片，剩余 {len(self.items)} 张")
+        else:
+            self._refresh_preview()
+            self.summary_label.setText("图片列表已清空")
 
     def _create_thumbnail_item(self, image_path: Path) -> QTableWidgetItem:
         pixmap = QPixmap(str(image_path))
@@ -651,6 +733,9 @@ class BatchTransformToolWidget(QWidget):
     def _run_batch(self) -> None:
         if not self.items:
             QMessageBox.warning(self, "缺少图片", "请先导入图片。")
+            return
+        if not self._checked_items():
+            QMessageBox.warning(self, "未勾选素材", "请先勾选需要处理的图片。")
             return
 
         config = self._current_config()

@@ -7,6 +7,12 @@ from pathlib import Path
 
 SUPPORTED_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp"}
 SUPPORTED_VIDEO_EXTENSIONS = {".mp4", ".mov", ".mkv", ".avi", ".webm", ".m4v"}
+COMMON_ASPECT_RATIO_VALUES = {
+    "16:9": 16 / 9,
+    "9:16": 9 / 16,
+    "1:1": 1.0,
+    "4:5": 4 / 5,
+}
 LOGO_ANCHORS = ("top_left", "top_right", "bottom_left", "bottom_right")
 LOGO_ANCHOR_LABELS = {
     "top_left": "左上角",
@@ -37,6 +43,30 @@ def resolve_logo_reference_axes(
     if reference_mode == "short_side":
         return short_side, short_side, short_side
     return safe_frame_width, safe_frame_width, safe_frame_height
+
+
+def matches_common_aspect_ratio(
+    width: int | float | None,
+    height: int | float | None,
+    ratio_label: str,
+    tolerance: float = 0.03,
+) -> bool:
+    if not width or not height:
+        return False
+    expected = COMMON_ASPECT_RATIO_VALUES.get(ratio_label)
+    if expected is None:
+        return False
+    actual = float(width) / max(float(height), 1.0)
+    return abs(actual - expected) <= tolerance
+
+
+def common_aspect_ratio_label(width: int | float | None, height: int | float | None) -> str:
+    if not width or not height:
+        return "-"
+    for ratio_label in COMMON_ASPECT_RATIO_VALUES:
+        if matches_common_aspect_ratio(width, height, ratio_label):
+            return ratio_label
+    return "其他"
 
 
 class ExportMode(str, Enum):
@@ -345,6 +375,7 @@ class ImageItem:
     import_root: Path | None = None
     width: int | None = None
     height: int | None = None
+    selected_for_batch: bool = True
     status: str = "待处理"
     message: str = ""
     output_path: Path | None = None
@@ -358,6 +389,10 @@ class ImageItem:
         if self.width and self.height:
             return f"{self.width} x {self.height}"
         return "-"
+
+    @property
+    def ratio_text(self) -> str:
+        return common_aspect_ratio_label(self.width, self.height)
 
 
 @dataclass(slots=True)
@@ -406,6 +441,7 @@ class VideoItem:
     width: int | None = None
     height: int | None = None
     frame_rate: str | None = None
+    selected_for_batch: bool = True
     status: str = "待处理"
     message: str = ""
     output_path: Path | None = None
@@ -419,6 +455,10 @@ class VideoItem:
         if self.width and self.height:
             return f"{self.width} x {self.height}"
         return "-"
+
+    @property
+    def ratio_text(self) -> str:
+        return common_aspect_ratio_label(self.width, self.height)
 
     @property
     def duration_text(self) -> str:
