@@ -6,7 +6,7 @@ from pathlib import Path
 from PySide6.QtWidgets import QApplication
 from PIL import Image
 
-from logo_toolkit.core.models import PixelLogoPlacement, VideoOperationType
+from logo_toolkit.core.models import PixelLogoPlacement, VideoEndCardAlphaMode, VideoOperationType
 from logo_toolkit.core.models import VideoItem
 from logo_toolkit.tools.registry import build_tool_registry
 from logo_toolkit.tools.video_tool import BatchVideoToolWidget
@@ -42,6 +42,32 @@ def test_video_widget_can_be_configured_as_logo_only_tool() -> None:
     widget.close()
 
 
+def test_video_widget_can_be_configured_as_endcard_only_tool() -> None:
+    get_app()
+    widget = BatchVideoToolWidget(available_operations=[VideoOperationType.ADD_ENDCARD])
+
+    assert widget.endcard_only_mode is True
+    assert widget.current_operation_type() == VideoOperationType.ADD_ENDCARD
+    assert widget.operation_combo.count() == 1
+    assert widget.operation_combo.itemData(0) == VideoOperationType.ADD_ENDCARD
+    assert widget.endcard_overlap_spin.value() == 3.8
+
+    widget.endcard_path = Path("F:/shared/endcard.mov")
+    widget.endcard_overlap_spin.setValue(1.8)
+    config = widget.current_config()
+
+    assert config.operation_type == VideoOperationType.ADD_ENDCARD
+    assert config.endcard.endcard_file == Path("F:/shared/endcard.mov")
+    assert config.endcard.overlap_seconds == 1.8
+    assert not hasattr(widget, "endcard_crossfade_spin")
+    assert not hasattr(widget, "endcard_alpha_mode_combo")
+    assert config.endcard.audio_crossfade_seconds == 0.5
+    assert config.endcard.alpha_mode == VideoEndCardAlphaMode.PREMIERE_COMPAT
+    assert "MP4(H.264/AAC)" in widget.output_note_label.text()
+
+    widget.close()
+
+
 def test_tool_registry_exposes_independent_video_logo_entry() -> None:
     get_app()
     definitions = build_tool_registry()
@@ -52,20 +78,27 @@ def test_tool_registry_exposes_independent_video_logo_entry() -> None:
         "batch_logo",
         "batch_video",
         "batch_video_logo",
+        "batch_video_endcard",
         "batch_video_frame",
     ]
 
     batch_video_widget = next(definition.factory() for definition in definitions if definition.tool_id == "batch_video")
     batch_video_operations = [batch_video_widget.operation_combo.itemData(index) for index in range(batch_video_widget.operation_combo.count())]
     assert VideoOperationType.ADD_LOGO not in batch_video_operations
+    assert VideoOperationType.ADD_ENDCARD not in batch_video_operations
 
     batch_video_logo_widget = next(
         definition.factory() for definition in definitions if definition.tool_id == "batch_video_logo"
     )
+    batch_video_endcard_widget = next(
+        definition.factory() for definition in definitions if definition.tool_id == "batch_video_endcard"
+    )
     assert batch_video_logo_widget.current_operation_type() == VideoOperationType.ADD_LOGO
+    assert batch_video_endcard_widget.current_operation_type() == VideoOperationType.ADD_ENDCARD
 
     batch_video_widget.close()
     batch_video_logo_widget.close()
+    batch_video_endcard_widget.close()
 
 
 def test_video_logo_preview_canvas_round_trips_source_pixels(tmp_path: Path) -> None:

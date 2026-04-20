@@ -48,6 +48,8 @@ from logo_toolkit.core.models import (
     VideoCompressionSettings,
     VideoContainerFormat,
     VideoConversionSettings,
+    VideoEndCardAlphaMode,
+    VideoEndCardSettings,
     VideoItem,
     VideoLogoSettings,
     VideoOperationType,
@@ -184,13 +186,18 @@ class BatchVideoToolWidget(QWidget):
         self.items: list[VideoItem] = []
         self.output_directory: Path | None = None
         self.logo_path: Path | None = None
+        self.endcard_path: Path | None = None
+        self.endcard_item: VideoItem | None = None
         self.logo_pixel_placement = PixelLogoPlacement(margin_x_px=40, margin_y_px=40, width_px=220, anchor="bottom_right")
         self.logo_render_options = RenderOptions()
         self.available_operations = list(available_operations or self.DEFAULT_OPERATIONS)
         self._table_syncing = False
         if not self.available_operations:
             raise ValueError("至少需要提供一个视频处理模式。")
+        self.single_operation_mode = len(self.available_operations) == 1
         self.logo_only_mode = self.available_operations == [VideoOperationType.ADD_LOGO]
+        self.endcard_only_mode = self.available_operations == [VideoOperationType.ADD_ENDCARD]
+        self.dedicated_operation_mode = self.logo_only_mode or self.endcard_only_mode
         self.resize_presets: dict[str, tuple[int, int]] = {
             "1920 x 1080 (1080p)": (1920, 1080),
             "1280 x 720 (720p)": (1280, 720),
@@ -230,6 +237,12 @@ class BatchVideoToolWidget(QWidget):
             output_layout.addWidget(self._build_output_group())
             output_layout.addWidget(self._build_progress_group())
             output_layout.addStretch(1)
+        elif self.endcard_only_mode:
+            operation_layout.addWidget(self._build_operation_group(), stretch=1)
+            output_layout.addWidget(self._build_metadata_group())
+            output_layout.addWidget(self._build_output_group())
+            output_layout.addWidget(self._build_progress_group())
+            output_layout.addStretch(1)
         else:
             operation_layout.addWidget(self._build_operation_group())
             operation_layout.addWidget(self._build_metadata_group())
@@ -249,6 +262,14 @@ class BatchVideoToolWidget(QWidget):
                 minimum_widths=[220, 260, 220],
                 initial_sizes=[520, 720, 280],
             )
+        elif self.endcard_only_mode:
+            configure_resizable_splitter(
+                splitter,
+                [import_panel, operation_panel, output_panel],
+                stretches=[2, 2, 1],
+                minimum_widths=[220, 240, 260],
+                initial_sizes=[520, 620, 420],
+            )
         else:
             configure_resizable_splitter(
                 splitter,
@@ -262,6 +283,7 @@ class BatchVideoToolWidget(QWidget):
         self._handle_operation_change(0)
         self._refresh_selected_metadata()
         self._update_logo_pixel_controls()
+        self._refresh_endcard_summary()
 
     def _build_import_group(self) -> QGroupBox:
         group = VideoImportGroupBox("1. 视频导入")
@@ -345,7 +367,12 @@ class BatchVideoToolWidget(QWidget):
         return group
 
     def _build_operation_group(self) -> QGroupBox:
-        group_title = "3. 预览校准" if self.logo_only_mode else "2. 处理模式"
+        if self.logo_only_mode:
+            group_title = "3. 预览校准"
+        elif self.endcard_only_mode:
+            group_title = "2. EC 设置"
+        else:
+            group_title = "2. 处理模式"
         group = QGroupBox(group_title)
         layout = QVBoxLayout(group)
 
@@ -357,6 +384,7 @@ class BatchVideoToolWidget(QWidget):
             VideoOperationType.RESIZE: self._build_resize_page,
             VideoOperationType.EXTRACT_AUDIO: self._build_audio_page,
             VideoOperationType.ADD_LOGO: self._build_logo_page,
+            VideoOperationType.ADD_ENDCARD: self._build_endcard_page,
         }
         for operation in self.available_operations:
             self.operation_combo.addItem(self._operation_label(operation), operation)
@@ -370,11 +398,11 @@ class BatchVideoToolWidget(QWidget):
         self.operation_tip_label.setWordWrap(True)
         self.operation_tip_label.setObjectName("supportingLabel")
 
-        if self.logo_only_mode:
+        if self.dedicated_operation_mode:
             layout.addWidget(self.operation_stack, stretch=1)
         else:
             top_form = QFormLayout()
-            if len(self.available_operations) == 1:
+            if self.single_operation_mode:
                 top_form.addRow("功能", QLabel(self._operation_label(self.available_operations[0])))
             else:
                 top_form.addRow("功能", self.operation_combo)
@@ -453,6 +481,41 @@ class BatchVideoToolWidget(QWidget):
         form.addRow("音频格式", self.audio_format_combo)
         return page
 
+    def _build_endcard_page(self) -> QWidget:
+        page = QWidget()
+        layout = QVBoxLayout(page)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(10)
+
+        button_row = QHBoxLayout()
+        choose_endcard_button = QPushButton("选择 EC")
+        choose_endcard_button.clicked.connect(self._choose_endcard)
+        self.endcard_path_edit = QLineEdit()
+        self.endcard_path_edit.setReadOnly(True)
+        button_row.addWidget(choose_endcard_button)
+        button_row.addWidget(self.endcard_path_edit)
+
+        form = QFormLayout()
+        self.endcard_overlap_spin = QDoubleSpinBox()
+        self.endcard_overlap_spin.setDecimals(2)
+        self.endcard_overlap_spin.setRange(0.0, 600.0)
+        self.endcard_overlap_spin.setSingleStep(0.1)
+        self.endcard_overlap_spin.setSuffix(" 秒")
+        self.endcard_overlap_spin.setValue(3.8)
+        self.endcard_overlap_spin.valueChanged.connect(self._refresh_selected_metadata)
+
+        form.addRow("重叠时长", self.endcard_overlap_spin)
+
+        self.endcard_summary_label = QLabel("请选择一个带透明通道的 EC 视频。")
+        self.endcard_summary_label.setWordWrap(True)
+        self.endcard_summary_label.setObjectName("supportingLabel")
+
+        layout.addLayout(button_row)
+        layout.addLayout(form)
+        layout.addWidget(self.endcard_summary_label)
+        layout.addStretch(1)
+        return page
+
     def _build_logo_controls_layout(self, layout: QVBoxLayout) -> None:
         button_row = QHBoxLayout()
         choose_logo_button = QPushButton("选择 Logo")
@@ -519,7 +582,7 @@ class BatchVideoToolWidget(QWidget):
         return page
 
     def _build_metadata_group(self) -> QGroupBox:
-        title = "当前视频" if self.logo_only_mode else "3. 视频信息"
+        title = "当前视频" if self.dedicated_operation_mode else "3. 视频信息"
         group = QGroupBox(title)
         layout = QFormLayout(group)
 
@@ -532,6 +595,13 @@ class BatchVideoToolWidget(QWidget):
         layout.addRow("文件", self.meta_name_label)
         layout.addRow("时长", self.meta_duration_label)
         layout.addRow("分辨率", self.meta_resolution_label)
+        if self.endcard_only_mode:
+            self.meta_endcard_duration_label = QLabel("-")
+            self.meta_actual_overlap_label = QLabel("-")
+            self.meta_estimated_duration_label = QLabel("-")
+            layout.addRow("EC 时长", self.meta_endcard_duration_label)
+            layout.addRow("实际重叠", self.meta_actual_overlap_label)
+            layout.addRow("预计输出时长", self.meta_estimated_duration_label)
         layout.addRow("状态", self.meta_status_label)
         return group
 
@@ -584,12 +654,15 @@ class BatchVideoToolWidget(QWidget):
             VideoOperationType.RESIZE: "视频改尺寸",
             VideoOperationType.EXTRACT_AUDIO: "视频提取音频",
             VideoOperationType.ADD_LOGO: "批量添加 Logo",
+            VideoOperationType.ADD_ENDCARD: "批量添加 EC",
         }
         return labels[operation]
 
     def _output_note_text(self, operation: VideoOperationType) -> str:
         if operation == VideoOperationType.ADD_LOGO:
             return "如未设置导出目录，会自动生成 video_output 文件夹。批量添加 Logo 默认保持原视频文件名。"
+        if operation == VideoOperationType.ADD_ENDCARD:
+            return "如未设置导出目录，会自动生成 video_output 文件夹。批量加 EC 固定导出 MP4(H.264/AAC)，并保持原视频文件名。"
         if operation == VideoOperationType.EXTRACT_AUDIO:
             return "如未设置导出目录，会自动生成 video_output 文件夹。提取音频时会按所选格式导出。"
         return "如未设置导出目录，会自动生成 video_output 文件夹。"
@@ -603,6 +676,7 @@ class BatchVideoToolWidget(QWidget):
             VideoOperationType.RESIZE: "支持常用尺寸预设与自定义宽高，默认保持原始比例。",
             VideoOperationType.EXTRACT_AUDIO: "从视频中提取音频，输出 MP3 / WAV / AAC。",
             VideoOperationType.ADD_LOGO: "先选择一张 Logo，再直接在主界面预览区定位。导出时会批量叠加到所有视频上。",
+            VideoOperationType.ADD_ENDCARD: "选择一个带透明通道的 EC 视频，设置重叠时长和音频交叉淡变后即可批量输出 MP4。",
         }
         operation = self.current_operation_type()
         self.operation_tip_label.setText(tips[operation])
@@ -757,6 +831,29 @@ class BatchVideoToolWidget(QWidget):
         self._update_logo_pixel_controls()
         self._refresh_logo_preview()
 
+    def _choose_endcard(self) -> None:
+        file_path, _ = QFileDialog.getOpenFileName(
+            self,
+            "选择 EC 视频",
+            "",
+            "EC Videos (*.mov);;Videos (*.mp4 *.mov *.mkv *.avi *.webm *.m4v)",
+        )
+        if not file_path:
+            return
+
+        candidate = Path(file_path)
+        try:
+            endcard_item = self.processor.get_video_metadata(candidate)
+        except Exception as exc:  # noqa: BLE001
+            QMessageBox.critical(self, "读取 EC 失败", str(exc))
+            return
+
+        self.endcard_path = candidate
+        self.endcard_item = endcard_item
+        self.endcard_path_edit.setText(str(candidate))
+        self._refresh_endcard_summary()
+        self._refresh_selected_metadata()
+
     def _load_videos(self, raw_paths: list[str]) -> None:
         collected_videos = collect_videos(raw_paths)
         if not collected_videos:
@@ -857,7 +954,12 @@ class BatchVideoToolWidget(QWidget):
             self.meta_duration_label.setText("-")
             self.meta_resolution_label.setText("-")
             self.meta_status_label.setText("请先导入并选择一个视频")
-            self._refresh_logo_preview()
+            if self.endcard_only_mode:
+                self.meta_endcard_duration_label.setText(self._format_duration_value(self._endcard_duration_seconds()))
+                self.meta_actual_overlap_label.setText("-")
+                self.meta_estimated_duration_label.setText("-")
+            if self.logo_only_mode:
+                self._refresh_logo_preview()
             return
 
         self.meta_name_label.setText(item.display_name)
@@ -867,8 +969,14 @@ class BatchVideoToolWidget(QWidget):
         if item.message:
             status_text = f"{status_text} - {item.message}"
         self.meta_status_label.setText(status_text)
-        self._update_logo_pixel_controls()
-        self._refresh_logo_preview()
+        if self.endcard_only_mode:
+            actual_overlap, estimated_duration = self._current_endcard_metrics(item)
+            self.meta_endcard_duration_label.setText(self._format_duration_value(self._endcard_duration_seconds()))
+            self.meta_actual_overlap_label.setText(self._format_duration_value(actual_overlap))
+            self.meta_estimated_duration_label.setText(self._format_duration_value(estimated_duration))
+        if self.logo_only_mode:
+            self._update_logo_pixel_controls()
+            self._refresh_logo_preview()
 
     def current_operation_type(self) -> VideoOperationType:
         current = self.operation_combo.currentData()
@@ -886,6 +994,7 @@ class BatchVideoToolWidget(QWidget):
             VideoOperationType.RESIZE: "",
             VideoOperationType.EXTRACT_AUDIO: "",
             VideoOperationType.ADD_LOGO: "",
+            VideoOperationType.ADD_ENDCARD: "",
         }
         trim_settings = VideoTrimSettings(
             start_time=self.trim_start_edit.text().strip() if hasattr(self, "trim_start_edit") else "",
@@ -921,6 +1030,16 @@ class BatchVideoToolWidget(QWidget):
                 render_options=self.logo_render_options,
                 use_pixel_positioning=True,
             ),
+            endcard=VideoEndCardSettings(
+                endcard_file=self.endcard_path,
+                overlap_seconds=(
+                    self.endcard_overlap_spin.value()
+                    if hasattr(self, "endcard_overlap_spin")
+                    else 3.8
+                ),
+                audio_crossfade_seconds=0.5,
+                alpha_mode=VideoEndCardAlphaMode.PREMIERE_COMPAT,
+            ),
         )
 
     def current_compression_preset(self) -> VideoCompressionPreset:
@@ -947,6 +1066,38 @@ class BatchVideoToolWidget(QWidget):
             return current
         return AudioExportFormat(str(current or AudioExportFormat.MP3.value))
 
+    def _endcard_duration_seconds(self) -> float | None:
+        if self.endcard_item is None:
+            return None
+        return self.endcard_item.duration_seconds
+
+    def _current_endcard_metrics(self, item: VideoItem | None = None) -> tuple[float | None, float | None]:
+        selected_item = item or self._selected_item()
+        endcard_duration = self._endcard_duration_seconds()
+        if (
+            selected_item is None
+            or selected_item.duration_seconds is None
+            or endcard_duration is None
+            or not hasattr(self, "endcard_overlap_spin")
+        ):
+            return None, None
+        requested_overlap = max(0.0, self.endcard_overlap_spin.value())
+        actual_overlap = min(requested_overlap, selected_item.duration_seconds, endcard_duration)
+        estimated_duration = selected_item.duration_seconds + endcard_duration - actual_overlap
+        return actual_overlap, estimated_duration
+
+    @staticmethod
+    def _format_duration_value(value: float | None) -> str:
+        if value is None:
+            return "-"
+        total_milliseconds = max(0, int(round(value * 1000)))
+        hours, remainder = divmod(total_milliseconds, 3_600_000)
+        minutes, remainder = divmod(remainder, 60_000)
+        seconds, milliseconds = divmod(remainder, 1_000)
+        if milliseconds:
+            return f"{hours:02d}:{minutes:02d}:{seconds:02d}.{milliseconds:03d}"
+        return f"{hours:02d}:{minutes:02d}:{seconds:02d}"
+
     def _selected_item(self) -> VideoItem | None:
         row = self.video_table.currentRow()
         if 0 <= row < len(self.items):
@@ -971,6 +1122,17 @@ class BatchVideoToolWidget(QWidget):
             return self.image_processor.get_image_size(self.logo_path)
         except Exception:  # noqa: BLE001
             return None
+
+    def _refresh_endcard_summary(self) -> None:
+        if not hasattr(self, "endcard_summary_label"):
+            return
+        if self.endcard_path is None or self.endcard_item is None:
+            self.endcard_summary_label.setText("请选择一个带透明通道的 EC 视频。")
+            return
+        self.endcard_summary_label.setText(
+            f"当前 EC: {self.endcard_path.name} | 时长 {self._format_duration_value(self.endcard_item.duration_seconds)}"
+            f" | 分辨率 {self.endcard_item.resolution_text}"
+        )
 
     def _logo_pixel_spinbox_changed(self) -> None:
         self.logo_pixel_placement = PixelLogoPlacement(
@@ -1081,6 +1243,9 @@ class BatchVideoToolWidget(QWidget):
             return
         if self.current_operation_type() == VideoOperationType.ADD_LOGO and self.logo_path is None:
             QMessageBox.warning(self, "缺少 Logo", "请先选择一张 Logo 图片。")
+            return
+        if self.current_operation_type() == VideoOperationType.ADD_ENDCARD and self.endcard_path is None:
+            QMessageBox.warning(self, "缺少 EC", "请先选择一个 EC 视频。")
             return
 
         config = self.current_config(only_checked=True)
