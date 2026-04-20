@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 import hashlib
 import re
@@ -397,16 +397,16 @@ class VideoProcessor:
         has_output_audio = False
 
         if source_has_audio and endcard_has_audio:
-            source_audio_filters = ["asetpts=PTS-STARTPTS"]
-            if actual_crossfade > 0:
-                source_audio_filters.append(f"afade=t=out:st={delay_seconds:.3f}:d={actual_crossfade:.3f}")
-            filter_parts.append(f"[0:a]{','.join(source_audio_filters)}[sourcea]")
+            filter_parts.append("[0:a]asetpts=PTS-STARTPTS[sourcea]")
 
             endcard_audio_filters = [f"adelay={self._seconds_to_milliseconds(delay_seconds)}:all=1"]
             if actual_crossfade > 0:
                 endcard_audio_filters.append(f"afade=t=in:st={delay_seconds:.3f}:d={actual_crossfade:.3f}")
             filter_parts.append(f"[1:a]{','.join(endcard_audio_filters)}[endcarda]")
-            filter_parts.append("[sourcea][endcarda]amix=inputs=2:duration=longest:dropout_transition=0[outa]")
+            # Keep the source audio during overlap and stack the EC audio on top of it.
+            filter_parts.append(
+                "[sourcea][endcarda]amix=inputs=2:duration=longest:dropout_transition=0:normalize=0[outa]"
+            )
             has_output_audio = True
         elif source_has_audio:
             filter_parts.append("[0:a]asetpts=PTS-STARTPTS[outa]")
@@ -566,5 +566,3 @@ class VideoProcessor:
         if frame_rate <= 0:
             return None
         return f"{frame_rate:g}"
-
-
